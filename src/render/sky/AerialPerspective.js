@@ -1,0 +1,133 @@
+import * as THREE from 'three';
+
+/**
+ * Replaces three's flat `mix(color, fogColor, f)` with real aerial perspective:
+ * an analytically integrated exponential *height* fog whose inscattered colour
+ * is the sky in the view direction, brightening toward the sun through a
+ * Henyey-Greenstein lobe. That single change is most of what separates a
+ * "three.js demo" look from a shipped shooter — distant geometry has to lose
+ * contrast and pick up the sky, and the haze has to glow where the sun is.
+ *
+ * Getting per-frame data into materials this system does not own is the awkward
+ * part. `UniformsUtils.clone` copies a Float32Array uniform *by reference*, so
+ * seeding one shared array into every `ShaderLib` entry gives every stock
+ * material a live view of the same 16 floats, with no `onBeforeCompile` hook to
+ * collide with the materials agent. Custom `ShaderMaterial`s that do not carry
+ * the uniform read zeroes and fall back to stock fog automatically.
+ */
+
+const AP_SIZE = 16;
+const params = new Float32Array(AP_SIZE);
+
+export const AP = {
+  /** 0:enabled 1:density 2:heightFalloff 3:maxOpacity */
+  set enabled(v) { params[0] = v ? 1 : 0; },
+  get enabled() { return params[0] > 0.5; },
+  set density(v) { params[1] = v; },
+  set heightFalloff(v) { params[2] = v; },
+  set maxOpacity(v) { params[3] = v; },
+  setSunDir(v) { params[4] = v.x; params[5] = v.y; params[6] = v.z; },
+  set anisotropy(v) { params[7] = v; },
+  setSunColor(c) { params[8] = c.r; params[9] = c.g; params[10] = c.b; },
+  set startDistance(v) { params[11] = v; },
+  setAmbientColor(c) { params[12] = c.r; params[13] = c.g; params[14] = c.b; },
+  set referenceHeight(v) { params[15] = v; },
+  array: params,
+};
+
+const FOG_PARS_VERTEX = /* glsl */ `
+#ifdef USE_FOG
+  varying float vFogDepth;
+  varying vec3 vFogViewPos;
+#endif
+`;
+
+const FOG_VERTEX = /* glsl */ `
+#ifdef USE_FOG
+  vFogDepth = - mvPosition.z;
+  vFogViewPos = mvPosition.xyz;
+#endif
+`;
+
+const FOG_PARS_FRAGMENT = /* glsl */ `
+#ifdef USE_FOG
+  uniform vec3 fogColor;
+  varying float vFogDepth;
+  varying vec3 vFogViewPos;
+  #ifdef FOG_EXP2
+    uniform float fogDensity;
+  #else
+    uniform float fogNear;
+    uniform float fogFar;
+  #endif
+
+  uniform vec4 apParams[4];
+
+  float apHG(float c, float g){
+    float g2 = g * g;
+    float d = 1.0 + g2 - 2.0 * g * c;
+    return 0.07957747 * (1.0 - g2) / (d * sqrt(max(d, 1e-4)));
+  }
+
+  /** Analytic integral of rho0 * exp(-k * (y - yref)) along the view segment. */
+  float apOpticalDepth(float y0, float y1, float dist, float rho0, float k, float yref){
+    float dy = y1 - y0;
+    float e0 = exp(-k * (y0 - yref));
+    if (abs(k * dy) < 1e-4) return rho0 * dist * e0;
+    float e1 = exp(-k * (y1 - yref));
+    return rho0 * dist * (e0 - e1) / (k * dy);
+  }
+#endif
+`;
+
+const FOG_FRAGMENT = /* glsl */ `
+#ifdef USE_FOG
+  if (apParams[0].x > 0.5) {
+    float apDist = max(length(vFogViewPos) - apParams[2].w, 0.0);
+    vec3 apDirW = normalize(vFogViewPos) * mat3(viewMatrix);
+    float apY0 = cameraPosition.y;
+    float apY1 = apY0 + apDirW.y * apDist;
+    float apTau = apOpticalDepth(apY0, apY1, apDist, apParams[0].y, apParams[0].z, apParams[3].w);
+    float apF = (1.0 - exp(-apTau)) * apParams[0].w;
+    float apPhase = 12.566371 * apHG(dot(apDirW, apParams[1].xyz), apParams[1].w);
+    vec3 apIn = apParams[3].xyz + apParams[2].xyz * apPhase;
+    gl_FragColor.rgb = gl_FragColor.rgb * (1.0 - apF) + apIn * apF;
+  } else {
+    #ifdef FOG_EXP2
+      float fogFactor = 1.0 - exp( - fogDensity * fogDensity * vFogDepth * vFogDepth );
+    #else
+      float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
+    #endif
+    gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );
+  }
+#endif
+`;
+
+let installed = false;
+
+/**
+ * Patches the fog chunks and seeds the shared uniform. Idempotent, and safe to
+ * call before any material exists — which is why the sky system calls it at
+ * module scope rather than in init().
+ */
+export function installAerialPerspective() {
+  if (installed) return AP;
+  installed = true;
+  try {
+    THREE.ShaderChunk.fog_pars_vertex = FOG_PARS_VERTEX;
+    THREE.ShaderChunk.fog_vertex = FOG_VERTEX;
+    THREE.ShaderChunk.fog_pars_fragment = FOG_PARS_FRAGMENT;
+    THREE.ShaderChunk.fog_fragment = FOG_FRAGMENT;
+
+    const seed = () => ({ value: params });
+    THREE.UniformsLib.fog.apParams = seed();
+    for (const key of Object.keys(THREE.ShaderLib)) {
+      const u = THREE.ShaderLib[key].uniforms;
+      if (u && u.fogColor !== undefined) u.apParams = seed();
+    }
+  } catch (e) {
+    installed = false;
+    console.warn('Sky: aerial perspective install failed, falling back to stock fog', e);
+  }
+  return AP;
+}

@@ -1,0 +1,181 @@
+import * as THREE from 'three';
+
+/**
+ * Procedural 32³ colour-grading LUTs.
+ *
+ * Baking the grade into a 3D texture rather than evaluating it per pixel keeps
+ * the final shader to one texture fetch no matter how elaborate the look gets,
+ * and it means looks can cross-fade by blending two fetches instead of
+ * interpolating a dozen uncorrelated parameters.
+ *
+ * The transfer runs on the post-tone-map display signal: linearise, white
+ * balance, ASC CDL (slope/offset/power), back to display, S-curve around a
+ * pivot, split-tone, luminance-weighted saturation, then a print black lift.
+ */
+
+export const LUT_SIZE = 32;
+
+const LOOKS = {
+  neutral: {
+    wb: [1.0, 1.0, 1.0],
+    exposure: 0.0,
+    gain: [1.0, 1.0, 1.0],
+    lift: [0.0, 0.0, 0.0],
+    gamma: [1.0, 1.0, 1.0],
+    contrast: 0.14,
+    pivot: 0.42,
+    sat: 1.03,
+    satShadow: 0.94,
+    satHighlight: 0.96,
+    shadowTint: [-0.004, 0.0, 0.010],
+    highlightTint: [0.010, 0.005, -0.004],
+    splitStrength: 1.0,
+    blackLift: 0.006,
+    whiteCut: 0.0,
+  },
+  warm_desert: {
+    wb: [1.055, 1.0, 0.902],
+    exposure: 0.02,
+    gain: [1.02, 1.0, 0.965],
+    lift: [0.002, 0.0, 0.004],
+    gamma: [0.98, 1.0, 1.035],
+    contrast: 0.28,
+    pivot: 0.40,
+    sat: 1.07,
+    satShadow: 0.86,
+    satHighlight: 0.92,
+    shadowTint: [-0.012, -0.002, 0.030],
+    highlightTint: [0.034, 0.016, -0.024],
+    splitStrength: 1.0,
+    blackLift: 0.013,
+    whiteCut: 0.004,
+  },
+  cold_urban: {
+    wb: [0.936, 0.988, 1.078],
+    exposure: -0.03,
+    gain: [0.985, 1.0, 1.02],
+    lift: [0.0, 0.001, 0.004],
+    gamma: [1.03, 1.0, 0.97],
+    contrast: 0.32,
+    pivot: 0.38,
+    sat: 0.87,
+    satShadow: 0.80,
+    satHighlight: 0.88,
+    shadowTint: [-0.016, 0.006, 0.032],
+    highlightTint: [0.006, 0.012, 0.018],
+    splitStrength: 1.0,
+    blackLift: 0.020,
+    whiteCut: 0.014,
+  },
+  night_teal: {
+    wb: [0.888, 0.976, 1.145],
+    exposure: 0.06,
+    gain: [0.96, 0.99, 1.05],
+    lift: [0.0, 0.002, 0.008],
+    gamma: [1.06, 1.01, 0.94],
+    contrast: 0.20,
+    pivot: 0.34,
+    sat: 0.80,
+    satShadow: 0.68,
+    satHighlight: 0.98,
+    shadowTint: [-0.024, 0.010, 0.052],
+    highlightTint: [0.052, 0.024, -0.026],
+    splitStrength: 1.0,
+    blackLift: 0.030,
+    whiteCut: 0.006,
+  },
+};
+
+export const LOOK_NAMES = Object.keys(LOOKS);
+
+const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
+const srgbToLin = (c) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+const linToSrgb = (c) => (c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055);
+const lum = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
+
+function sCurve(x, amount, pivot) {
+  const t = clamp01(x);
+  const s = t * t * (3 - 2 * t);
+  const blended = t + (s - t) * amount;
+  // Re-anchor so the pivot keeps its value; without this every look drifts dark.
+  const p = pivot;
+  const ps = p * p * (3 - 2 * p);
+  const shift = (ps - p) * amount;
+  return clamp01(blended - shift * (1 - Math.abs(2 * t - 1)));
+}
+
+function bake(look, out) {
+  const N = LUT_SIZE;
+  const inv = 1 / (N - 1);
+  let o = 0;
+  for (let bi = 0; bi < N; bi++) {
+    for (let gi = 0; gi < N; gi++) {
+      for (let ri = 0; ri < N; ri++) {
+        let r = srgbToLin(ri * inv);
+        let g = srgbToLin(gi * inv);
+        let b = srgbToLin(bi * inv);
+
+        const e = Math.pow(2, look.exposure);
+        r *= look.wb[0] * e;
+        g *= look.wb[1] * e;
+        b *= look.wb[2] * e;
+
+        r = Math.pow(Math.max(0, r * look.gain[0] + look.lift[0]), look.gamma[0]);
+        g = Math.pow(Math.max(0, g * look.gain[1] + look.lift[1]), look.gamma[1]);
+        b = Math.pow(Math.max(0, b * look.gain[2] + look.lift[2]), look.gamma[2]);
+
+        let dr = linToSrgb(Math.min(r, 1));
+        let dg = linToSrgb(Math.min(g, 1));
+        let db = linToSrgb(Math.min(b, 1));
+
+        dr = sCurve(dr, look.contrast, look.pivot);
+        dg = sCurve(dg, look.contrast, look.pivot);
+        db = sCurve(db, look.contrast, look.pivot);
+
+        const l0 = lum(dr, dg, db);
+        const sw = (1 - l0) * (1 - l0) * look.splitStrength;
+        const hw = l0 * l0 * look.splitStrength;
+        dr += look.shadowTint[0] * sw + look.highlightTint[0] * hw;
+        dg += look.shadowTint[1] * sw + look.highlightTint[1] * hw;
+        db += look.shadowTint[2] * sw + look.highlightTint[2] * hw;
+
+        const l1 = lum(dr, dg, db);
+        const sat = look.sat * (look.satShadow + (look.satHighlight - look.satShadow) * l1);
+        dr = l1 + (dr - l1) * sat;
+        dg = l1 + (dg - l1) * sat;
+        db = l1 + (db - l1) * sat;
+
+        const span = 1 - look.blackLift - look.whiteCut;
+        dr = look.blackLift + clamp01(dr) * span;
+        dg = look.blackLift + clamp01(dg) * span;
+        db = look.blackLift + clamp01(db) * span;
+
+        out[o++] = clamp01(dr) * 255;
+        out[o++] = clamp01(dg) * 255;
+        out[o++] = clamp01(db) * 255;
+        out[o++] = 255;
+      }
+    }
+  }
+}
+
+export function buildLookTextures() {
+  const N = LUT_SIZE;
+  const textures = {};
+  for (const name of LOOK_NAMES) {
+    const data = new Uint8Array(N * N * N * 4);
+    bake(LOOKS[name], data);
+    const tex = new THREE.Data3DTexture(data, N, N, N);
+    tex.format = THREE.RGBAFormat;
+    tex.type = THREE.UnsignedByteType;
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.wrapS = tex.wrapT = tex.wrapR = THREE.ClampToEdgeWrapping;
+    tex.colorSpace = THREE.NoColorSpace;
+    tex.unpackAlignment = 1;
+    tex.needsUpdate = true;
+    tex.name = `lut:${name}`;
+    textures[name] = tex;
+  }
+  return textures;
+}
