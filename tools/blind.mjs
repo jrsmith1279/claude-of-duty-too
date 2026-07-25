@@ -63,10 +63,23 @@ async function main() {
 
   await mkdir(path.dirname(outBase), { recursive: true });
 
+  // Optional source crops, "x,y,w,h" in source pixels. Used to pull an
+  // environment-only region out of a reference frame whose foreground is a
+  // character, so the comparison stays environment-vs-environment.
+  const parseCrop = (s) => {
+    if (!s) return null;
+    const p = s.split(',').map((n) => parseFloat(n));
+    return p.length === 4 && p.every(Number.isFinite) ? { x: p[0], y: p[1], w: p[2], h: p[3] } : null;
+  };
+  const aCrop = parseCrop(arg('acrop', ''));
+  const bCrop = parseCrop(arg('bcrop', ''));
+
   // Deterministic shuffle: even hash keeps A on the left, odd swaps.
   const swap = (hash32(path.basename(outBase) + salt) & 1) === 1;
   const leftPath = swap ? bPath : aPath;
   const rightPath = swap ? aPath : bPath;
+  const leftCrop = swap ? bCrop : aCrop;
+  const rightCrop = swap ? aCrop : bCrop;
 
   const [leftUrl, rightUrl] = await Promise.all([dataUrl(leftPath), dataUrl(rightPath)]);
 
@@ -74,7 +87,7 @@ async function main() {
   const page = await browser.newPage({ viewport: { width: 100, height: 100 } });
 
   const size = await page.evaluate(
-    async ({ leftUrl, rightUrl, label, layout, panelW }) => {
+    async ({ leftUrl, rightUrl, label, layout, panelW, leftCrop, rightCrop }) => {
       const load = (src) =>
         new Promise((res, rej) => {
           const im = new Image();
@@ -82,7 +95,24 @@ async function main() {
           im.onerror = rej;
           im.src = src;
         });
-      const [L, R] = await Promise.all([load(leftUrl), load(rightUrl)]);
+      const [Lsrc, Rsrc] = await Promise.all([load(leftUrl), load(rightUrl)]);
+
+      // Bake any crop into an offscreen canvas so the rest of the layout code
+      // only ever deals with whole images.
+      const applyCrop = (img, crop) => {
+        if (!crop) return img;
+        const x = Math.max(0, Math.min(img.width, crop.x));
+        const y = Math.max(0, Math.min(img.height, crop.y));
+        const w = Math.max(1, Math.min(img.width - x, crop.w));
+        const h = Math.max(1, Math.min(img.height - y, crop.h));
+        const c = document.createElement('canvas');
+        c.width = w;
+        c.height = h;
+        c.getContext('2d').drawImage(img, x, y, w, h, 0, 0, w, h);
+        return c;
+      };
+      const L = applyCrop(Lsrc, leftCrop);
+      const R = applyCrop(Rsrc, rightCrop);
 
       // Normalise both panels to the same displayed width, preserving aspect.
       const lh = Math.round((L.height / L.width) * panelW);
@@ -138,7 +168,7 @@ async function main() {
       document.body.appendChild(c);
       return { W, H };
     },
-    { leftUrl, rightUrl, label, layout, panelW }
+    { leftUrl, rightUrl, label, layout, panelW, leftCrop, rightCrop }
   );
 
   await page.setViewportSize({ width: size.W, height: size.H });
@@ -155,6 +185,8 @@ async function main() {
     reference: swap ? 'LEFT' : 'RIGHT',
     a: path.relative(ROOT, aPath),
     b: path.relative(ROOT, bPath),
+    aCrop,
+    bCrop,
   };
   await writeFile(`${outBase}.key.json`, JSON.stringify(key, null, 2));
 
