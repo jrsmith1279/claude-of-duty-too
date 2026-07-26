@@ -112,6 +112,9 @@ class Foot {
     this.lift = 0.08;
     this.pitch = 0;
     this.heel = 0;
+    this.heelLift = 0;
+    this.nx = 0;
+    this.nz = 0;
   }
 }
 
@@ -194,84 +197,103 @@ export class BotAnimator {
 
   // ----------------------------------------------------------------- footwork
 
+  /**
+   * The gait is driven by the feet themselves, not by a free-running phase
+   * clock. A foot steps when it has been left more than half a stride behind
+   * where the body wants it, and it lands half a stride ahead of where the body
+   * will be when the swing ends. That is self-synchronising: the two feet fall
+   * into alternation on their own, the rhythm tracks any speed change
+   * instantly, and a planted foot can never be left further behind than the
+   * legs can reach — which a phase clock cannot promise, and which shows up
+   * immediately as a bot walking in a permanent squat.
+   */
   _stepFeet(s, dt, crouch) {
     const st = crouch > 0.5 ? STANCE.crouch : STANCE.stand;
     const speed = this.speedSmooth;
-    const running = speed > 2.6;
-    // Stride grows with speed: a 1.4 m/s walk steps ~0.75 m, a 4.5 m/s run ~1.3 m.
-    const stride = THREE.MathUtils.clamp(0.52 + speed * 0.185, 0.5, 1.34);
-    const swingTime = THREE.MathUtils.clamp(0.42 - speed * 0.045, 0.17, 0.42);
+    const running = speed > 2.7;
+    // 0.75 m step at a 1.4 m/s walk, 1.25 m at a 4.5 m/s run.
+    const stride = THREE.MathUtils.clamp(0.46 + speed * 0.175, 0.42, 1.28) * (1 - crouch * 0.28);
+    const swingTime = THREE.MathUtils.clamp(0.40 - speed * 0.042, 0.16, 0.40);
+    const c = Math.cos(this.yaw), sn = Math.sin(this.yaw);
+    const invSpeed = speed > 1e-3 ? 1 / speed : 0;
 
     if (speed > 0.12) this.phase += (speed * dt) / (2 * stride);
     this.phase -= Math.floor(this.phase);
 
-    const c = Math.cos(this.yaw), sn = Math.sin(this.yaw);
-    // Where the body wants this foot, ignoring the gait: hip width, opened out
-    // in a crouch, and pushed ahead by half a stride's worth of travel.
-    const lead = Math.min(speed * 0.16, 0.34);
-
-    let swingingCount = 0;
-    for (const f of this.feet) if (f.swinging) swingingCount++;
+    let swinging = -1;
+    let want = -1, wantErr = 0;
 
     for (let i = 0; i < 2; i++) {
       const f = this.feet[i];
       const lx = f.side * HIP_HALF * st.width;
-      const nx = s.pos.x + c * lx + s.velocity.x * lead;
-      const nz = s.pos.z - sn * lx + s.velocity.z * lead;
+      f.nx = s.pos.x + c * lx;
+      f.nz = s.pos.z - sn * lx;
 
       if (f.swinging) {
+        swinging = i;
         f.t += dt / f.duration;
         if (f.t >= 1) {
           f.t = 1;
           f.swinging = false;
+          swinging = -1;
           f.plant.copy(f.target);
           f.plantYaw = f.targetYaw;
+          // Keep the cosmetic phase (weapon bob) locked to real footfalls.
+          this.phase = f.side < 0 ? 0.0 : 0.5;
           if (s.onFootDown) s.onFootDown(f, speed);
+        } else {
+          const t = f.t;
+          // Ease-out horizontally so the foot decelerates into the plant, and a
+          // sine arc vertically. Both separate a step from a slide.
+          const e = t * t * (3 - 2 * t);
+          const eo = 1 - (1 - t) * (1 - t);
+          f.pos.lerpVectors(f.prev, f.target, eo);
+          f.pos.y = THREE.MathUtils.lerp(f.prev.y, f.target.y, e) + Math.sin(Math.PI * t) * f.lift;
+          // Carry the raised heel into the first third of the swing: the foot
+          // rolls off the toe rather than snapping flat, and without it the
+          // ankle target drops 9 cm on the frame the foot lifts, which the leg
+          // cannot reach and which pops.
+          f.heel = f.heelLift * Math.max(0, 1 - t / 0.34);
+          // Dorsiflex through the rest of the swing so the toe clears the
+          // ground, then land heel first. Positive pitch is toe-down.
+          f.pitch = f.heel * 0.62 - Math.sin(Math.PI * t) * (running ? 0.42 : 0.26);
+          continue;
         }
-        const t = f.t;
-        // Ease-out horizontally so the foot decelerates into the plant, and a
-        // sine arc vertically. Both are what separates a step from a slide.
-        const e = t * t * (3 - 2 * t);
-        const eo = 1 - (1 - t) * (1 - t);
-        f.pos.lerpVectors(f.prev, f.target, eo);
-        f.pos.y = THREE.MathUtils.lerp(f.prev.y, f.target.y, e) + Math.sin(Math.PI * t) * f.lift;
-        // Dorsiflex through the swing so the toe clears the ground, and land
-        // heel-first. Positive pitch is toe-down.
-        f.pitch = -Math.sin(Math.PI * t) * (running ? 0.42 : 0.26);
-        continue;
       }
 
       f.pos.copy(f.plant);
       // Toe-off: `heel` is set by the hip solver when the leg runs out of reach.
-      f.pitch = damp(f.pitch, (f.heel || 0) * 0.62, 16, dt);
+      f.pitch = damp(f.pitch, f.heel * 0.62, 16, dt);
 
-      // Step triggers. Either the gait says it is this foot's turn, or the foot
-      // has been left too far behind — which is what produces a turn-in-place
-      // shuffle and a settle-after-stopping without any special case.
-      const err = Math.hypot(f.plant.x - nx, f.plant.z - nz);
+      const err = Math.hypot(f.plant.x - f.nx, f.plant.z - f.nz);
       const yawErr = Math.abs(shortAngle(f.plantYaw - this.yaw));
-      const trigger = f.side < 0 ? 0.0 : 0.5;
-      const phaseHit = speed > 0.35 && crossed(this.phase, this.phase - (speed * dt) / (2 * stride), trigger);
-      const strayed = err > (speed > 0.35 ? stride * 0.95 : 0.30) || yawErr > 0.55;
-      if (!phaseHit && !strayed) continue;
-      // One foot on the ground at a time, except in a run, where a short
-      // flight phase is correct and is most of what makes a run read as a run.
-      if (swingingCount > 0 && !(running && this.feet[1 - i].t > 0.62)) continue;
-
-      f.prev.copy(f.pos);
-      f.prevYaw = f.plantYaw;
-      const over = phaseHit ? stride * 0.5 : Math.min(err * 0.65, 0.4);
-      const dirx = speed > 0.35 ? s.velocity.x / Math.max(speed, 1e-3) : 0;
-      const dirz = speed > 0.35 ? s.velocity.z / Math.max(speed, 1e-3) : 0;
-      f.target.set(nx + dirx * over, s.pos.y, nz + dirz * over);
-      f.target.y = s.groundAt ? s.groundAt(f.target.x, f.target.z, s.pos.y) : s.pos.y;
-      f.targetYaw = this.yaw;
-      f.duration = swingTime;
-      f.lift = 0.045 + speed * 0.028 + Math.abs(f.target.y - f.prev.y) * 0.5;
-      f.t = 0;
-      f.swinging = true;
-      swingingCount++;
+      const threshold = Math.max(0.235, stride * 0.5);
+      const score = err / threshold + yawErr / 0.5;
+      if (score > 1 && score > wantErr) { want = i; wantErr = score; }
     }
+
+    // One foot on the ground at a time, except in a run, where a brief flight
+    // phase is correct and is most of what makes a run read as a run.
+    const busy = swinging >= 0 && !(running && this.feet[swinging].t > 0.66);
+    if (want < 0 || busy) return;
+
+    const f = this.feet[want];
+    f.prev.copy(f.pos);
+    f.prevYaw = f.plantYaw;
+    // Land half a stride ahead of where the body will be at touchdown.
+    const ahead = speed > 0.3 ? swingTime + stride * 0.5 * invSpeed : 0;
+    f.target.set(
+      f.nx + s.velocity.x * ahead,
+      s.pos.y,
+      f.nz + s.velocity.z * ahead,
+    );
+    f.target.y = s.groundAt ? s.groundAt(f.target.x, f.target.z, s.pos.y) : s.pos.y;
+    f.targetYaw = this.yaw;
+    f.duration = swingTime;
+    f.lift = 0.04 + speed * 0.026 + Math.abs(f.target.y - f.prev.y) * 0.6;
+    f.t = 0;
+    f.heelLift = f.heel;
+    f.swinging = true;
   }
 
   // ------------------------------------------------------------------ torso
@@ -281,11 +303,22 @@ export class BotAnimator {
     const speed = this.speedSmooth;
     const hipBase = THREE.MathUtils.lerp(STANCE.stand.hip, STANCE.crouch.hip, crouch);
 
-    // Gait bob: two dips per cycle (one per foot strike), sunk deeper the
-    // faster the bot moves.
-    const gait = this.phase * Math.PI * 2;
-    const bobAmp = Math.min(0.012 + speed * 0.0125, 0.055) * (1 - crouch * 0.5);
-    let hipTarget = s.pos.y + hipBase - Math.abs(Math.sin(gait)) * bobAmp * 2 + bobAmp;
+    // Every gait quantity below is read off the feet rather than off a clock,
+    // so the bob, the weight shift and the pelvic rotation cannot drift out of
+    // sync with the steps that are actually happening.
+    const c = Math.cos(this.yaw), sn = Math.sin(this.yaw);
+    const fL = this.feet[0], fR = this.feet[1];
+    const supL = fL.swinging ? THREE.MathUtils.smoothstep(fL.t, 0.72, 1) : 1;
+    const supR = fR.swinging ? THREE.MathUtils.smoothstep(fR.t, 0.72, 1) : 1;
+    const supSum = supL + supR + 1e-3;
+    const lxL = (fL.pos.x - s.pos.x) * c - (fL.pos.z - s.pos.z) * sn;
+    const lzL = (fL.pos.x - s.pos.x) * sn + (fL.pos.z - s.pos.z) * c;
+    const lxR = (fR.pos.x - s.pos.x) * c - (fR.pos.z - s.pos.z) * sn;
+    const lzR = (fR.pos.x - s.pos.x) * sn + (fR.pos.z - s.pos.z) * c;
+    const spread = Math.hypot(lxL - lxR, lzL - lzR);
+
+    // The pelvis is lowest when the feet are furthest apart — that IS the bob.
+    let hipTarget = s.pos.y + hipBase - Math.min(Math.max(spread - 0.2, 0) * 0.075, 0.06);
 
     // Hip height is then whatever the legs can actually reach. Two things do
     // the work at full stride, and without both the ankle IK simply cannot
@@ -293,10 +326,9 @@ export class BotAnimator {
     //   - the pelvis drops, exactly as a real one does at double support;
     //   - the trailing heel comes off the ground, which buys back ~8 cm of
     //     reach and is the single most recognisable moment in a walk cycle.
-    const c = Math.cos(this.yaw), sn = Math.sin(this.yaw);
     for (let pass = 0; pass < 2; pass++) {
       for (const f of this.feet) {
-        if (f.swinging) { f.heel = 0; continue; }
+        if (f.swinging) continue;   // its heel is driven by the swing roll-off
         const lx = f.side * HIP_HALF;
         const jx = s.pos.x + c * lx, jz = s.pos.z - sn * lx;
         const dxz = Math.hypot(f.pos.x - jx, f.pos.z - jz);
@@ -316,12 +348,12 @@ export class BotAnimator {
     this.leanZ.step(leanRoll, dt);
 
     const hips = this.bone('hips');
-    const gaitAmp = THREE.MathUtils.clamp(speed / 3.6, 0, 1);
-    // Pelvic list: the swing-side hip drops, and the pelvis counter-rotates
-    // against the shoulders. Both are small and both are load-bearing.
-    const list = Math.sin(gait) * 0.085 * gaitAmp;
-    const pelvisYaw = -Math.sin(gait) * 0.16 * gaitAmp;
-    const sway = Math.sin(gait) * (0.020 + 0.022 * gaitAmp);
+    // Pelvic list: the swing-side hip drops. Pelvic yaw: the forward leg pulls
+    // its hip forward. The shoulders then counter-rotate against both. All
+    // three are small and all three are load-bearing.
+    const list = -(supL - supR) * 0.075;
+    const pelvisYaw = THREE.MathUtils.clamp(-(lzR - lzL) * 0.24, -0.22, 0.22);
+    const sway = (lxL * supL + lxR * supR) / supSum * 0.34;
 
     hips.position.set(
       sway * (1 - crouch * 0.4),
@@ -551,14 +583,6 @@ export class BotAnimator {
 }
 
 // -------------------------------------------------------------------- helpers
-
-/** True when `trigger` was crossed going forward between two phase samples. */
-function crossed(now, before, trigger) {
-  const a = before - Math.floor(before);
-  const b = now - Math.floor(now);
-  if (a <= b) return trigger > a && trigger <= b;
-  return trigger > a || trigger <= b;   // wrapped
-}
 
 /** Forward kinematics for one bone with an unmodified rest offset. */
 function fk(parentP, parentQ, parentRest, childRest, localQ, outP, outQ) {
