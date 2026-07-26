@@ -150,9 +150,40 @@ async function main() {
     await page.waitForTimeout(SETTLE_MS);
     const file = path.join(OUT, `${name}.png`);
     await page.screenshot({ path: file, type: 'png' });
-    result.shots.push({ name, file, desc: s.desc });
+    // Per-shot cost, not one reading at the end of the run. Presets differ by
+    // 2x in draw calls and the aggregate hid that completely — every previous
+    // report quoted whatever the last preset happened to cost. fps is the
+    // median of three 0.5 s engine buckets: a single bucket on a box running
+    // other work swings 11-60 and is not a measurement.
+    const st = await page.evaluate(async () => {
+      const s = window.__COD__?.stats;
+      const f = [];
+      for (let i = 0; i < 3; i++) {
+        await new Promise((r) => setTimeout(r, 520));
+        f.push(s.fps);
+      }
+      f.sort((a, b) => a - b);
+      return { fps: Math.round(f[1]), fpsMin: Math.round(f[0]), fpsMax: Math.round(f[2]),
+               drawCalls: s.drawCalls, triangles: s.triangles, programs: s.programs };
+    });
+    result.shots.push({ name, file, desc: s.desc, ...st });
   }
 
+  // Worst case across the set, which is the number the 350/60 budget is
+  // actually about — plus the last-frame reading the old report used, kept so
+  // historical numbers stay comparable.
+  if (result.shots.length) {
+    const worst = (k) => Math.max(...result.shots.map((s) => s[k] ?? 0));
+    result.budget = {
+      maxDrawCalls: worst('drawCalls'),
+      maxTriangles: worst('triangles'),
+      maxPrograms: worst('programs'),
+      minFps: Math.min(...result.shots.map((s) => s.fps ?? 0)),
+      drawCallBudget: 350,
+      fpsTarget: 60,
+      withinBudget: worst('drawCalls') <= 350 && Math.min(...result.shots.map((s) => s.fps ?? 0)) >= 60,
+    };
+  }
   result.stats = await page.evaluate(() => {
     const s = window.__COD__?.stats;
     return s ? { fps: Math.round(s.fps), drawCalls: s.drawCalls, triangles: s.triangles, programs: s.programs } : null;
