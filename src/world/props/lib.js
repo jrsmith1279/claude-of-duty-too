@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 /**
  * Geometry toolkit shared by every prop module.
@@ -124,10 +125,25 @@ export function projectUV(geo) {
  * triangle headroom is free, and it is the difference between "a crate" and
  * "a grey cuboid".
  *
+ * `loopsY` inserts horizontal vertex loops low on the box. Without them the
+ * contact-darkening ramp `bedGeo` writes into the colour attribute has nowhere
+ * to land: on anything taller than about 0.6 m the ramp is Gouraud-smeared
+ * from the base vertices all the way to the top ones and reads as a flat tint
+ * over the whole object rather than as a contact band at the ground. Three
+ * loops at 8 / 20 / 35 percent of the height take a box from 44 triangles to
+ * about 190 — measured, not estimated — and are the difference between an
+ * object sitting on the ground and an object floating above it. Off by
+ * default; turn it on for anything over ~0.6 m that `bedGeo` will touch.
+ *
+ * Note that `wearEdges` reads the `codEdge` attribute written here, and both
+ * `twoSided` and `shellGeo` drop it, so wear must be applied first.
+ *
  * @param {number} w @param {number} h @param {number} d
  * @param {number} c chamfer width in metres (clamped to a third of the box)
+ * @param {boolean|number[]} [loopsY] true for the default 0.08/0.20/0.35
+ *   fractions of the height, or an explicit array of fractions
  */
-export function chamferBox(w, h, d, c = 0.02) {
+export function chamferBox(w, h, d, c = 0.02, loopsY = false) {
   const hx = w / 2, hy = h / 2, hz = d / 2;
   c = Math.min(c, hx * 0.6, hy * 0.6, hz * 0.6);
   const inner = [hx - c, hy - c, hz - c];
@@ -146,6 +162,10 @@ export function chamferBox(w, h, d, c = 0.02) {
   const tris = [];
   const quad = (a, b, cc, d2) => { tris.push(a, b, cc, a, cc, d2); };
   const S = [-1, 1];
+  // Everything after the 6 inset faces is a bevel quad or a corner triangle,
+  // i.e. an edge. `wearEdges` needs to know which is which and cannot tell
+  // from the geometry afterwards, so the split is recorded here.
+  let faceVerts = 0;
 
   // 6 inset faces
   for (let axis = 0; axis < 3; axis++) {
@@ -158,6 +178,7 @@ export function chamferBox(w, h, d, c = 0.02) {
       quad(corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1));
     }
   }
+  faceVerts = tris.length;
   // 12 edge bevels: fix two signs, sweep the third axis
   for (let axis = 0; axis < 3; axis++) {
     const u = (axis + 1) % 3, v = (axis + 2) % 3;
@@ -175,16 +196,88 @@ export function chamferBox(w, h, d, c = 0.02) {
   }
 
   const n = tris.length;
-  const pos = new Float32Array(n * 3);
+  let pos = new Array(n * 3);
+  let edge = new Array(n);
   for (let i = 0; i < n; i++) {
     pos[i * 3] = tris[i][0]; pos[i * 3 + 1] = tris[i][1]; pos[i * 3 + 2] = tris[i][2];
+    edge[i] = i < faceVerts ? 0 : 1;
   }
+
+  if (loopsY) {
+    const fracs = Array.isArray(loopsY) ? loopsY : LOOP_FRACS;
+    const planes = fracs.map((f) => -hy + h * f).filter((y) => y > -hy + 1e-4 && y < hy - 1e-4);
+    if (planes.length) {
+      const cut = cutTrianglesY(pos, edge, planes);
+      pos = cut.pos; edge = cut.mask;
+    }
+  }
+
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+  geo.setAttribute('codEdge', new THREE.BufferAttribute(new Float32Array(edge), 1));
   fixWindingConvex(geo);
   geo.computeVertexNormals();
   projectUV(geo);
   return geo;
+}
+
+/** Default horizontal loop positions, as fractions of the height. */
+const LOOP_FRACS = [0.08, 0.20, 0.35];
+
+/**
+ * Splits a non-indexed triangle soup against a list of horizontal planes.
+ *
+ * Inserting vertex loops by editing the generator's three nested sign loops is
+ * error-prone and has to be redone for every primitive; cutting the finished
+ * soup works for all of them and only ever adds vertices in the plane of an
+ * existing triangle, so face normals and the projected UVs are unchanged.
+ *
+ * @param {number[]} pos flat xyz, 9 numbers per triangle
+ * @param {number[]|null} mask one scalar per vertex, carried (not interpolated)
+ * @param {number[]} planes world-space Y values to cut at
+ */
+function cutTrianglesY(pos, mask, planes) {
+  const EPS = 1e-6;
+  let cur = pos, curM = mask;
+  for (const y of planes) {
+    const out = [], outM = [];
+    const emit = (a, b, c, m) => {
+      out.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
+      if (curM) outM.push(m, m, m);
+    };
+    const lerpY = (a, b) => {
+      const t = (y - a[1]) / (b[1] - a[1]);
+      return [a[0] + (b[0] - a[0]) * t, y, a[2] + (b[2] - a[2]) * t];
+    };
+    for (let t = 0; t < cur.length; t += 9) {
+      const P = [
+        [cur[t], cur[t + 1], cur[t + 2]],
+        [cur[t + 3], cur[t + 4], cur[t + 5]],
+        [cur[t + 6], cur[t + 7], cur[t + 8]],
+      ];
+      const m = curM ? curM[t / 3] : 0;
+      const s = P.map((p) => (p[1] - y > EPS ? 1 : p[1] - y < -EPS ? -1 : 0));
+      if (!(s.includes(1) && s.includes(-1))) { emit(P[0], P[1], P[2], m); continue; }
+      const iz = s.indexOf(0);
+      if (iz >= 0) {
+        // One vertex sits on the plane: one cut, from it to the far edge.
+        const b = (iz + 1) % 3, c = (iz + 2) % 3;
+        const M = lerpY(P[b], P[c]);
+        emit(P[iz], P[b], M, m);
+        emit(P[iz], M, P[c], m);
+      } else {
+        const lone = s[0] === s[1] ? 2 : s[0] === s[2] ? 1 : 0;
+        const b = (lone + 1) % 3, c = (lone + 2) % 3;
+        const Mb = lerpY(P[lone], P[b]);
+        const Mc = lerpY(P[lone], P[c]);
+        emit(P[lone], Mb, Mc, m);
+        emit(Mb, P[b], P[c], m);
+        emit(Mb, P[c], Mc, m);
+      }
+    }
+    cur = out; curM = curM ? outM : null;
+  }
+  return { pos: cur, mask: curM };
 }
 
 /**
@@ -304,24 +397,66 @@ export function corrugatedGeo(w, h, ribs = 14, depth = 0.02) {
   return geo;
 }
 
-/** A sagging cloth quad: catenary droop plus a torn, ragged lower edge. */
+/**
+ * A hanging cloth: folds radiating from the attached edge, a spanwise
+ * catenary, a scalloped free hem and an optional torn edge.
+ *
+ * The old 8x6 grid could not hold a fold — a fold needs at least three
+ * columns to have a crest and two valleys, and eight columns across a 1.5 m
+ * banner is one crest every 19 cm of *geometry* against a fold spacing that
+ * wants to be about 22 cm. So the whole sheet read as one smooth curved quad,
+ * which is exactly what a game engine's cloth looks like and exactly what a
+ * photograph's does not. 14x10 is 280 triangles, which at this project's
+ * triangle headroom is free.
+ *
+ * Displacement order matters and is: folds out of plane, then the spanwise
+ * droop, then the hem scallop, then the tear. `v = 0` is the free hem and
+ * `v = 1` the attached edge — that is the convention every existing caller
+ * already relies on, and the tear stays there.
+ */
 export function clothGeo(w, h, sag, rand, torn = 0.0) {
-  const nx = 8, ny = 6;
+  // One fold per ~22 cm of width, never fewer than three.
+  const k = Math.max(3, Math.round(w / 0.22));
+  // 14 columns is the floor, not the answer. The hem scallop runs at twice the
+  // fold frequency, so a 2.5 m canopy wants k = 11 and 22 scallops across it;
+  // sampled on 14 columns that is well past Nyquist and the sheet comes out as
+  // an aliased bunting sawtooth instead of cloth — verified in street.png
+  // before this clamp went in. Four columns per fold keeps the crests round.
+  const nx = Math.max(14, k * 4), ny = 10;
   const geo = new THREE.PlaneGeometry(w, h, nx, ny);
   const pos = geo.attributes.position;
   const ph = rand() * 10;
+  const A = 0.035 * w;
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i), y = pos.getY(i);
     const u = (x / w) + 0.5, v = (y / h) + 0.5;
-    // Cross-wise catenary + a lengthwise ripple; the cloth hangs from v = 1.
-    const drop = sag * 4 * u * (1 - u);
-    const ripple = Math.sin(u * 9.3 + ph) * sag * 0.16 * v;
-    pos.setY(i, y - drop * v);
-    pos.setZ(i, ripple);
-    if (torn > 0 && v < 0.18) {
+    // The top row lands on v = 1 only to within float error, and
+    // Math.pow(-1e-7, 1.6) is NaN, which poisons the whole merged buffer.
+    const iv = Math.max(0, 1 - v);
+
+    // 1. Folds. Out of plane, strongest at the free hem and pinched out
+    //    towards the attachment, which is how fabric pinned along an edge
+    //    actually hangs.
+    let dz = A * Math.sin(Math.PI * u * k) * Math.pow(iv, 1.6);
+
+    // 2. Spanwise catenary, unchanged: the sheet is slung between two points
+    //    at u = 0 and u = 1 and bellies in the middle.
+    let dy = -sag * 4 * u * (1 - u) * v;
+
+    // 3. Hem scallop. The free edge waves *between* the folds instead of
+    //    running dead straight, which is the single most visible tell on a
+    //    backlit sheet. Applied on (1 - v) so it lands on the hem, not on the
+    //    pinned edge where it would be invisible.
+    dy -= 0.02 * (1 - Math.cos(2 * Math.PI * u * k)) * iv;
+
+    // 4. Tear along the free edge.
+    if (torn > 0 && v < 0.12) {
       const n = hash3(x * 3.3, ph, 0.5);
-      pos.setY(i, pos.getY(i) + torn * n * h);
+      dy += torn * h * n;
+      dz += (hash3(x * 5.7, ph + 3.1, 1.7) - 0.5) * 0.03;
     }
+    pos.setY(i, y + dy);
+    pos.setZ(i, dz);
   }
   geo.computeVertexNormals();
   scaleUV(geo, w, h);
@@ -413,6 +548,283 @@ export function twoSided(geo) {
   return out;
 }
 
+/** Default shell thicknesses, metres. */
+export const SHELL_T = { laundry: 0.004, canvas: 0.008, tarpaulin: 0.014 };
+
+/**
+ * Gives a thin surface real thickness: a front copy, a back copy, and — the
+ * entire point — a rim strip of quads stitching the two together around the
+ * boundary loop.
+ *
+ * `twoSided()` duplicates the quad at *zero* offset, so a sheet has two
+ * facings and no edge. Under a low sun a backlit awning or a hanging sheet
+ * then terminates in a mathematically sharp silhouette with no lit rim, which
+ * is one of the most reliable ways to spot a real-time frame: real fabric,
+ * card, sheet metal and plywood all catch a bright line along their cut edge.
+ * The rim is 4 quads per boundary segment of geometry — about 40 triangles on
+ * a small sheet — and it is the difference between a cut-out and an object.
+ *
+ * @param {THREE.BufferGeometry} geo an open surface (a plane, a corrugation)
+ * @param {number} t thickness in metres; see `SHELL_T`
+ */
+export function shellGeo(geo, t = SHELL_T.canvas) {
+  const src = geo.index ? geo.toNonIndexed() : geo;
+  const sp = src.attributes.position.array;
+  let sn = src.attributes.normal ? src.attributes.normal.array : null;
+  if (!sn) { src.computeVertexNormals(); sn = src.attributes.normal.array; }
+  const su = src.attributes.uv ? src.attributes.uv.array : null;
+  const n = sp.length / 3;
+  const half = t * 0.5;
+
+  // Boundary detection. Vertex positions are quantised to 0.1 mm so the
+  // duplicated vertices of a non-indexed mesh collapse onto one key; an edge
+  // shared by two triangles appears twice and is interior, an edge that
+  // appears once is on the boundary loop.
+  const key = (i) => `${Math.round(sp[i * 3] * 1e4)},${Math.round(sp[i * 3 + 1] * 1e4)},${Math.round(sp[i * 3 + 2] * 1e4)}`;
+  const keys = new Array(n);
+  for (let i = 0; i < n; i++) keys[i] = key(i);
+  const seen = new Map();
+  for (let tri = 0; tri < n; tri += 3) {
+    for (let e = 0; e < 3; e++) {
+      const a = tri + e, b = tri + ((e + 1) % 3);
+      const ka = keys[a], kb = keys[b];
+      const id = ka < kb ? ka + '|' + kb : kb + '|' + ka;
+      const prev = seen.get(id);
+      if (prev === undefined) seen.set(id, a); else seen.set(id, -1);
+    }
+  }
+  /** @type {number[]} first vertex index of each boundary edge, in triangle winding order */
+  const rim = [];
+  for (const v of seen.values()) if (v >= 0) rim.push(v);
+
+  const rimTris = rim.length * 2;
+  const total = n * 2 + rimTris * 3;
+  const pos = new Float32Array(total * 3);
+  const nrm = new Float32Array(total * 3);
+  const uv = new Float32Array(total * 2);
+
+  // Front copy, pushed out along its own normal.
+  for (let i = 0; i < n; i++) {
+    pos[i * 3] = sp[i * 3] + sn[i * 3] * half;
+    pos[i * 3 + 1] = sp[i * 3 + 1] + sn[i * 3 + 1] * half;
+    pos[i * 3 + 2] = sp[i * 3 + 2] + sn[i * 3 + 2] * half;
+    nrm[i * 3] = sn[i * 3]; nrm[i * 3 + 1] = sn[i * 3 + 1]; nrm[i * 3 + 2] = sn[i * 3 + 2];
+    if (su) { uv[i * 2] = su[i * 2]; uv[i * 2 + 1] = su[i * 2 + 1]; }
+  }
+  // Back copy, pulled in, wound and normalled the other way.
+  for (let tri = 0; tri < n; tri += 3) {
+    for (let e = 0; e < 3; e++) {
+      const s = tri + (2 - e), dOff = n + tri + e;
+      pos[dOff * 3] = sp[s * 3] - sn[s * 3] * half;
+      pos[dOff * 3 + 1] = sp[s * 3 + 1] - sn[s * 3 + 1] * half;
+      pos[dOff * 3 + 2] = sp[s * 3 + 2] - sn[s * 3 + 2] * half;
+      nrm[dOff * 3] = -sn[s * 3]; nrm[dOff * 3 + 1] = -sn[s * 3 + 1]; nrm[dOff * 3 + 2] = -sn[s * 3 + 2];
+      if (su) { uv[dOff * 2] = su[s * 2]; uv[dOff * 2 + 1] = su[s * 2 + 1]; }
+    }
+  }
+
+  // Rim. For a front-facing triangle wound CCW about normal `nn`, walking a
+  // boundary edge a->b in that winding puts the surface interior on one side
+  // and cross(edge, nn) pointing out of it — so the strip normal is exact and
+  // does not need a smoothing pass to find.
+  let o = n * 2;
+  for (const a of rim) {
+    const tri = a - (a % 3);
+    const b = tri + ((a - tri + 1) % 3);
+    _v.set(sp[b * 3] - sp[a * 3], sp[b * 3 + 1] - sp[a * 3 + 1], sp[b * 3 + 2] - sp[a * 3 + 2]);
+    _v2.set(
+      (sn[a * 3] + sn[b * 3]) * 0.5,
+      (sn[a * 3 + 1] + sn[b * 3 + 1]) * 0.5,
+      (sn[a * 3 + 2] + sn[b * 3 + 2]) * 0.5,
+    );
+    _v3.crossVectors(_v, _v2);
+    if (_v3.lengthSq() < 1e-12) continue;
+    _v3.normalize();
+    const put = (vi, sign, uu) => {
+      pos[o * 3] = sp[vi * 3] + sn[vi * 3] * half * sign;
+      pos[o * 3 + 1] = sp[vi * 3 + 1] + sn[vi * 3 + 1] * half * sign;
+      pos[o * 3 + 2] = sp[vi * 3 + 2] + sn[vi * 3 + 2] * half * sign;
+      nrm[o * 3] = _v3.x; nrm[o * 3 + 1] = _v3.y; nrm[o * 3 + 2] = _v3.z;
+      if (su) { uv[o * 2] = su[vi * 2]; uv[o * 2 + 1] = su[vi * 2 + 1] + uu; }
+      o++;
+    };
+    // (Af, Ab, Bb) and (Af, Bb, Bf) — outward.
+    put(a, 1, 0); put(a, -1, t); put(b, -1, t);
+    put(a, 1, 0); put(b, -1, t); put(b, 1, 0);
+  }
+
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.BufferAttribute(pos.subarray(0, o * 3), 3));
+  out.setAttribute('normal', new THREE.BufferAttribute(nrm.subarray(0, o * 3), 3));
+  out.setAttribute('uv', new THREE.BufferAttribute(uv.subarray(0, o * 2), 2));
+  return out;
+}
+
+// ------------------------------------------------------------ contact / wear
+
+/** Shared by `bedGeo` and `Batch`'s insert-time ramp so they cannot diverge. */
+const BED_RAMP = 0.30;
+const BED_FLOOR = 0.42;
+
+function smoothstep01(e0, e1, x) {
+  const t = e1 === e0 ? (x >= e1 ? 1 : 0) : (x - e0) / (e1 - e0);
+  const c = t < 0 ? 0 : t > 1 ? 1 : t;
+  return c * c * (3 - 2 * c);
+}
+
+/**
+ * The ambient darkening an object owes the ground it is standing on.
+ *
+ * A prop placed on a surface with no contact shadow floats, and this is the
+ * single most common reason a rendered still reads as fake. `Batch.build`
+ * already carries a per-vertex colour attribute and `SurfaceShader` folds that
+ * colour into the *indirect* diffuse term as well as albedo — so writing a
+ * ramp here kills the ambient light on the bottom of the object, which is
+ * exactly what contact occlusion does, at the cost of nothing per frame.
+ *
+ * Undersides get a further 0.55: a face pointing at the ground can see almost
+ * no sky at all.
+ *
+ * @param {THREE.BufferGeometry} geo modified in place
+ * @param {number} groundLocalY the geometry-local Y of the ground plane
+ * @param {number} [rampH] metres over which the darkening lifts
+ * @param {number} [floor] darkest multiplier, at the contact line
+ */
+export function bedGeo(geo, groundLocalY = 0, rampH = BED_RAMP, floor = BED_FLOOR) {
+  const pos = geo.attributes.position;
+  const nrm = geo.attributes.normal;
+  let col = geo.attributes.color;
+  if (!col || col.count !== pos.count) {
+    col = new THREE.BufferAttribute(new Float32Array(pos.count * 3).fill(1), 3);
+    geo.setAttribute('color', col);
+  }
+  for (let i = 0; i < pos.count; i++) {
+    let k = floor + (1 - floor) * smoothstep01(0, rampH, pos.getY(i) - groundLocalY);
+    if (nrm && nrm.getY(i) < -0.3) k *= 0.55;
+    col.setXYZ(i, col.getX(i) * k, col.getY(i) * k, col.getZ(i) * k);
+  }
+  col.needsUpdate = true;
+  return geo;
+}
+
+/**
+ * Rubs the paint off the edges of a `chamferBox`.
+ *
+ * Every worn object in a photograph is worn on its *edges* — that is where a
+ * hand, a boot or another crate touches it — and the wear is patchy, never a
+ * uniform outline, because contact is patchy. `chamferBox` tags its bevel
+ * quads and corner triangles at build time (`codEdge`), so this only has to
+ * look them up and blend a hash into the colour attribute.
+ *
+ * Silently does nothing on a geometry that was not built by `chamferBox`,
+ * which is deliberate: the alternative is a caller-side guard at every site.
+ *
+ * @param {THREE.BufferGeometry} geo modified in place
+ * @param {THREE.Color|number} wearColor the exposed substrate
+ * @param {number} amount 0..1 maximum blend towards it
+ */
+export function wearEdges(geo, wearColor = 0x9a9086, amount = 0.55, rand = null) {
+  const mask = geo.attributes.codEdge;
+  const pos = geo.attributes.position;
+  if (!mask || !pos) return geo;
+  let col = geo.attributes.color;
+  if (!col || col.count !== pos.count) {
+    col = new THREE.BufferAttribute(new Float32Array(pos.count * 3).fill(1), 3);
+    geo.setAttribute('color', col);
+  }
+  _c.set(wearColor);
+  const jitter = rand ? rand() * 7.3 : 0;
+  for (let i = 0; i < pos.count; i++) {
+    if (mask.getX(i) < 0.5) continue;
+    const n = hash3(pos.getX(i) * 4.1 + jitter, pos.getY(i) * 4.1, pos.getZ(i) * 4.1);
+    // Squared so most of the edge stays intact and a few patches go bare.
+    const k = amount * n * n;
+    col.setXYZ(
+      i,
+      col.getX(i) * (1 - k) + _c.r * k,
+      col.getY(i) * (1 - k) + _c.g * k,
+      col.getZ(i) * (1 - k) + _c.b * k,
+    );
+  }
+  col.needsUpdate = true;
+  return geo;
+}
+
+/**
+ * Lofts a closed surface through a list of cross sections along +Z.
+ *
+ * Vehicles are the one prop class that cannot be assembled out of chamfered
+ * boxes — a car reads as a car because of a continuous shoulder line running
+ * the length of the body and a roof that flows into the pillars, and a stack
+ * of boxes has neither. A loft gives both for a few hundred triangles.
+ *
+ * Each station is `{ z, pts: [[x,y], ...], wScale?, cutY? }` where `pts` is
+ * the RIGHT half of the profile only, ordered from the bottom of the section
+ * to the top; the left half is mirrored about x = 0, so a section is
+ * guaranteed symmetric and cannot be authored crooked. `wScale` scales the
+ * half-width of that station (tapering a nose or a tail), `cutY` clamps the
+ * profile up to a sill line.
+ *
+ * Normals are creased at 40 degrees so the shoulder stays a continuous smooth
+ * highlight while the sill crease below it stays a hard line — one smoothing
+ * pass cannot do both and a car needs both.
+ */
+export function loftGeo(sections, creaseDeg = 40) {
+  const rings = [];
+  for (const s of sections) {
+    const ws = s.wScale === undefined ? 1 : s.wScale;
+    const half = [];
+    for (const [px, py] of s.pts) {
+      const y = s.cutY === undefined ? py : Math.max(py, s.cutY);
+      half.push([px * ws, y]);
+    }
+    const ring = [];
+    for (const p of half) ring.push([p[0], p[1], s.z]);
+    // Mirror back down the left side, skipping any point already on the axis.
+    for (let i = half.length - 1; i >= 0; i--) {
+      if (Math.abs(half[i][0]) < 1e-5) continue;
+      ring.push([-half[i][0], half[i][1], s.z]);
+    }
+    rings.push(ring);
+  }
+  if (rings.length < 2) return new THREE.BufferGeometry();
+  const m = rings[0].length;
+  const out = [];
+  const push = (p) => out.push(p[0], p[1], p[2]);
+
+  for (let i = 0; i < rings.length - 1; i++) {
+    const A = rings[i], B = rings[i + 1];
+    if (A.length !== m || B.length !== m) continue;   // stations must agree
+    for (let j = 0; j < m; j++) {
+      const j2 = (j + 1) % m;
+      push(A[j]); push(A[j2]); push(B[j2]);
+      push(A[j]); push(B[j2]); push(B[j]);
+    }
+  }
+  // Flat caps, so the ends are not open holes when seen from in front.
+  const cap = (ring, flip) => {
+    let cx = 0, cy = 0, cz = ring[0][2];
+    for (const p of ring) { cx += p[0]; cy += p[1]; }
+    cx /= ring.length; cy /= ring.length;
+    for (let j = 0; j < ring.length; j++) {
+      const j2 = (j + 1) % ring.length;
+      if (flip) { push([cx, cy, cz]); push(ring[j2]); push(ring[j]); }
+      else { push([cx, cy, cz]); push(ring[j]); push(ring[j2]); }
+    }
+  };
+  cap(rings[0], true);
+  cap(rings[rings.length - 1], false);
+
+  let geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(out), 3));
+  geo.computeVertexNormals();
+  try {
+    geo = toCreasedNormals(geo, creaseDeg * Math.PI / 180);
+  } catch (e) { /* faceted normals are a survivable fallback */ }
+  projectUV(geo);
+  return geo;
+}
+
 /**
  * Lays a sheet authored in the XY plane flat, normal up, with its former
  * "height" axis running out along +Z.
@@ -452,23 +864,32 @@ export class Batch {
    * @param {THREE.BufferGeometry} geo source (not modified, not retained after build)
    * @param {THREE.Matrix4} m world transform
    * @param {THREE.Color|null} color per-part tint, or null for white
+   * @param {number|null} [groundY] world Y of the ground this piece sits on.
+   *   When given, `build()` applies the `bedGeo` contact ramp per vertex as it
+   *   merges. Doing it here rather than in the caller is the whole point:
+   *   scattered clutter reuses one shared source geometry hundreds of times,
+   *   and baking the ramp would need a geometry clone per piece.
    */
-  addMatrix(geo, m, color) {
+  addMatrix(geo, m, color, groundY = null) {
     const pos = geo.attributes.position;
     if (!pos) return this;
     const idx = geo.index;
     const count = idx ? idx.count : pos.count;
-    this._parts.push({ geo, m: m.clone(), r: color ? color.r : 1, g: color ? color.g : 1, b: color ? color.b : 1 });
+    this._parts.push({
+      geo, m: m.clone(),
+      r: color ? color.r : 1, g: color ? color.g : 1, b: color ? color.b : 1,
+      bedY: typeof groundY === 'number' ? groundY : null,
+    });
     this.tris += count / 3;
     return this;
   }
 
   /** Convenience: position + euler + uniform-or-vector scale. */
-  add(geo, x, y, z, rx = 0, ry = 0, rz = 0, sx = 1, sy = sx, sz = sx, color = null) {
+  add(geo, x, y, z, rx = 0, ry = 0, rz = 0, sx = 1, sy = sx, sz = sx, color = null, groundY = null) {
     _e.set(rx, ry, rz);
     _q.setFromEuler(_e);
     _m4.compose(_v.set(x, y, z), _q, _s.set(sx, sy, sz));
-    return this.addMatrix(geo, _m4, color);
+    return this.addMatrix(geo, _m4, color, groundY);
   }
 
   /** Merged geometry, or null if nothing was added. Clears the part list. */
@@ -504,7 +925,15 @@ export class Batch {
         }
         if (su) { uv[(o + i) * 2] = su.getX(j); uv[(o + i) * 2 + 1] = su.getY(j); }
         const cr = sc ? sc.getX(j) : 1, cg = sc ? sc.getY(j) : 1, cb = sc ? sc.getZ(j) : 1;
-        color[(o + i) * 3] = cr * p.r; color[(o + i) * 3 + 1] = cg * p.g; color[(o + i) * 3 + 2] = cb * p.b;
+        // Contact ramp, in world space, off the already-transformed vertex.
+        let bed = 1;
+        if (p.bedY !== null) {
+          bed = BED_FLOOR + (1 - BED_FLOOR) * smoothstep01(0, BED_RAMP, _v.y - p.bedY);
+          if (sn && normal[(o + i) * 3 + 1] < -0.3) bed *= 0.55;
+        }
+        color[(o + i) * 3] = cr * p.r * bed;
+        color[(o + i) * 3 + 1] = cg * p.g * bed;
+        color[(o + i) * 3 + 2] = cb * p.b * bed;
       }
       o += n;
     }

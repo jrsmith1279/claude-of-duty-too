@@ -276,7 +276,7 @@ export class Site {
    * @param {number} [windYaw] override, radians; defaults to along the street
    */
   buildShelter(windYaw) {
-    const { nx, nz, open, step, taken, lee } = this;
+    const { nx, nz, open, step, lee } = this;
     lee.fill(0);
 
     if (windYaw === undefined) {
@@ -764,6 +764,8 @@ export class BatchSet {
     this.variants = new Map();
     this.pieces = 0;
     this.z0 = 40;
+    /** @type {number|null} sticky ground height for the contact ramp; see bed(). */
+    this._bedY = null;
   }
 
   /**
@@ -809,11 +811,27 @@ export class BatchSet {
     return b;
   }
 
+  /**
+   * Sets the ground height that subsequent adds bed into, or `null` to stop.
+   *
+   * Sticky rather than an extra positional argument on four already-long
+   * signatures: a scatter loop places a whole prop — legs, body, lid, handle —
+   * against one ground height, so `bs.bed(o.y)` once around the loop body is
+   * both shorter and harder to get wrong than threading the value through
+   * every call. `Batch` applies the ramp per vertex during the merge, so this
+   * never clones a geometry.
+   */
+  bed(y) {
+    this._bedY = typeof y === 'number' ? y : null;
+    return this;
+  }
+
   /** Adds a geometry under an explicit world matrix. */
-  addMatrix(matKey, geo, m, color, shadow = false) {
+  addMatrix(matKey, geo, m, color, shadow = false, groundY = undefined) {
     if (!geo) return this;
     if (!this.allowShadow) shadow = false;
-    this._bucket(matKey, m.elements[14], shadow).batch.addMatrix(geo, m, color || null);
+    const gy = groundY === undefined ? (this._bedY ?? null) : groundY;
+    this._bucket(matKey, m.elements[14], shadow).batch.addMatrix(geo, m, color || null, gy);
     this.pieces++;
     return this;
   }
