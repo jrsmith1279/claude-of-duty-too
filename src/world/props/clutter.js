@@ -4,7 +4,7 @@ import {
   projectUV, jitterColor, hash3, bedGeo,
 } from './lib.js';
 import { wallFalloff } from './layout.js';
-import { contactDecal, gritSeam } from './decals.js';
+import { contactDecal, gritSeam, carriagewayAxis } from './decals.js';
 
 /**
  * Ground clutter. The single highest-value thing in the whole content pass.
@@ -345,42 +345,11 @@ function smoothstep(e0, e1, x) {
 }
 
 /**
- * The carriageway's centreline, as a signed perpendicular coordinate.
- *
- * Wheel ruts are the one debris pattern that has nothing to do with walls: they
- * are where the traffic *is*, and everything either side of them is where the
- * traffic swept the road clean. Expressing that needs a road axis, and the road
- * axis is the long axis of the largest facade — the same one `Site.buildShelter`
- * derives the wind from, so the ruts and the drifts agree.
- *
- * The offset is the *median* perpendicular coordinate of the asphalt cells, not
- * the mean: a side road or a forecourt hanging off one side drags a mean
- * sideways by metres and puts both rut pairs on the same half of the street.
- */
-function roadAxis(site) {
-  const f = site.facades[0];
-  if (!f) return null;
-  const dx = f.bx - f.ax, dz = f.bz - f.az;
-  const l = Math.hypot(dx, dz) || 1;
-  const px = -dz / l, pz = dx / l;
-  const acc = [];
-  for (let i = 0; i < site.open.length; i++) {
-    if (!site.open[i]) continue;
-    const s = site.surf[i];
-    if (s !== 'asphalt' && s !== 'asphalt_worn') continue;
-    const ix = i % site.nx, iz = (i / site.nx) | 0;
-    acc.push(site.xOf(ix) * px + site.zOf(iz) * pz);
-  }
-  if (acc.length < 8) return null;
-  acc.sort((a, b) => a - b);
-  return { px, pz, c0: acc[acc.length >> 1] };
-}
-
-/**
  * Two Gaussian bands per half-carriageway at 1.75 m and 4.55 m from the crown:
  * a 3.5 m gauge — one pair of wheels — inside each lane. Debris survives under
  * the axle line and between the lanes; the crown and the wheel paths themselves
- * are swept.
+ * are swept. Shares `carriagewayAxis` with the wheel-polish decals, so the
+ * debris banks in exactly the gaps the polished bands leave.
  */
 function rutFn(axis) {
   if (!axis) return () => 0;
@@ -523,10 +492,15 @@ export function scatterGround(ctx, site, bs, rand, density = 1, env = null) {
       const s = sMin + rand() * (sMax - sMin);
       const geo = pick(list, rand);
       drop(bs, kind, geo, p.x, p.y, p.z, rand, s, sinkFor(p.surface, rand));
-      // Anything with a readable footprint gets an occlusion patch under it.
-      // Gated on size and globally capped inside `contactDecal`, so this costs
-      // nothing for the eight thousand pieces that are too small to need one.
-      if (soft && kit) contactDecal(soft, kit, rand, p.x, p.y, p.z, footprint(geo) * s);
+      // Anything with a readable footprint gets an occlusion patch under it —
+      // one piece in eight, not every piece. The budget is a couple of hundred
+      // quads against a few thousand eligible pieces, and taking them in scatter
+      // order spends the entire allowance inside the first `run()` call, which
+      // put every contact patch in the map on chunk fragments and none on
+      // anything the camera was pointed at. A coin flip spreads them.
+      if (soft && kit && rand() < 0.12) {
+        contactDecal(soft, kit, rand, p.x, p.y, p.z, footprint(geo) * s);
+      }
       pieces++;
     }
   };
@@ -604,7 +578,7 @@ export function scatterGround(ctx, site, bs, rand, density = 1, env = null) {
   // The 0.04 floor is deliberately tiny. The crown of a driven road is swept
   // clean, and the rubric's bare-ground failure is answered by surface detail —
   // seams, patches, wheel polish, damp — not by sprinkling gravel on it.
-  const axis = roadAxis(site);
+  const axis = carriagewayAxis(site);
   const rut = rutFn(axis);
   const road = site.field((d, corner, surf, x, z, indoor, step, lee, gutter) =>
     (indoor || d > 17 ? 0 : 1)
@@ -666,7 +640,7 @@ function edgeSpill(site, bs, rand, density, soft, kit) {
     n++;
   }
   // One dust seam per few metres of kerb, so the spill has something to sit in.
-  if (soft && kit) gritSeam(soft, kit, site, seam, rand, Math.round(70 * density));
+  if (soft && kit) gritSeam(soft, kit, site, seam, rand, Math.round(40 * density));
   return n;
 }
 
@@ -881,5 +855,5 @@ export function wallBerms(ctx, site, bs, rand, density = 1, env = null) {
 
 export {
   pools as clutterPools, pick as pickShape, warpSlab, rebarGeo, canGeo, roofTileGeo,
-  variants, clusterScatter, roadAxis, rutFn, sinkFor, footprint, KINDS as CLUTTER_KINDS,
+  variants, clusterScatter, rutFn, sinkFor, footprint, KINDS as CLUTTER_KINDS,
 };
