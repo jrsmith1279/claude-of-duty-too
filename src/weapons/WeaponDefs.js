@@ -27,15 +27,15 @@ export const GUN_MATERIALS = {
   // hard-anodised or phosphated finish is *dark and broad* — the oxide layer
   // scatters — so F0 comes down by half and roughness goes up to 0.60, which
   // is what puts the highlight along the chamfers instead of across the slab.
-  black: ['gun_metal', { uvScale: 8, roughness: 0.60, color: 0x83878e, envMapIntensity: 0.60 }],
+  black: ['gun_metal', { uvScale: 3.5, roughness: 0.58, color: 0x6a6e75, envMapIntensity: 0.55 }],
   // Phosphated steel: barrel, gas block, small parts. Warmer, rougher still.
-  park: ['gun_metal', { uvScale: 9, roughness: 0.70, color: 0x8b867d, envMapIntensity: 0.52 }],
+  park: ['gun_metal', { uvScale: 4.0, roughness: 0.68, color: 0x767169, envMapIntensity: 0.50 }],
   // Bright machined steel: bolt carrier, charging handle, pins, screws.
-  steel: ['steel_brushed', { uvScale: 6, roughness: 0.36, color: 0xa9aeb5, envMapIntensity: 0.75 }],
+  steel: ['steel_brushed', { uvScale: 3.5, roughness: 0.36, color: 0x969ba2, envMapIntensity: 0.70 }],
   // Blued/oiled steel: slides, hammers. Smoother than parkerising and darker.
-  blued: ['gun_metal', { uvScale: 10, roughness: 0.30, color: 0x767c88, envMapIntensity: 0.80 }],
+  blued: ['gun_metal', { uvScale: 4.5, roughness: 0.30, color: 0x646a76, envMapIntensity: 0.75 }],
   // Injection-moulded furniture.
-  polymer: ['gun_polymer', { uvScale: 7, roughness: 0.64, color: 0x9a9da2, envMapIntensity: 0.55 }],
+  polymer: ['gun_polymer', { uvScale: 3.5, roughness: 0.64, color: 0x83868b, envMapIntensity: 0.50 }],
   polymer_fde: ['gun_polymer', { uvScale: 7, roughness: 0.68, color: 0xa88a63, envMapIntensity: 0.55 }],
   // Rubberised butt pad and grip inserts.
   rubber: ['rubber', { uvScale: 4, envMapIntensity: 0.5 }],
@@ -51,9 +51,9 @@ export const GUN_MATERIALS = {
   wood: ['gun_wood', { uvScale: 5, envMapIntensity: 0.6 }],
   brass: ['gun_metal', { uvScale: 12, roughness: 0.34, color: 0xc79a4c, metalness: 1, envMapIntensity: 0.7 }],
   // Nomex glove — dark, matte, sheened fabric. Deliberately not skin.
-  glove: ['fabric_canvas', { uvScale: 5, roughness: 0.88, color: 0x33362f }],
-  glove_pad: ['rubber', { uvScale: 6, color: 0x8d9088 }],
-  sleeve: ['fabric_canvas', { uvScale: 3, roughness: 0.92, color: 0x6d6a52 }],
+  glove: ['fabric_canvas', { uvScale: 18, roughness: 0.90, color: 0x2f322c, envMapIntensity: 0.45 }],
+  glove_pad: ['rubber', { uvScale: 10, color: 0x5c5f58, envMapIntensity: 0.4 }],
+  sleeve: ['fabric_canvas', { uvScale: 16, roughness: 0.94, color: 0x585640, envMapIntensity: 0.4 }],
 };
 
 /** Cached `key -> THREE.Material` resolver bound to a material library. */
@@ -188,7 +188,7 @@ const RELOAD_PISTOL = {
  * eye-relief distance is a number here.
  */
 const POSE_RIFLE = {
-  hip: { pos: [0.130, -0.092, -0.315], rot: [1.0, -5.6, 2.6] },
+  hip: { pos: [0.145, -0.096, -0.300], rot: [1.2, 7.0, 2.6] },
   // 0.30 m is long for a red dot in real life, but it is deliberate: the
   // viewmodel composite focuses its little depth-of-field at 0.32 m, so
   // putting the sight there keeps the reticle razor sharp while the muzzle and
@@ -271,7 +271,7 @@ export const WEAPONS = {
     shell: { size: 0.0064, len: 0.033, speed: 3.0 },
     reload: RELOAD_PISTOL,
     pose: {
-      hip: { pos: [0.118, -0.104, -0.285], rot: [2.0, -7.5, 3.0] },
+      hip: { pos: [0.132, -0.108, -0.272], rot: [2.2, 8.5, 3.0] },
       adsEyeRelief: 0.305,
       sprint: { pos: [0.088, -0.172, -0.245], rot: [-8.0, 30.0, -36.0] },
       lowReady: { pos: [0.112, -0.196, -0.270], rot: [-26.0, -9.0, 3.0] },
