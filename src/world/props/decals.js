@@ -577,8 +577,8 @@ export function groundDecals(ctx, site, soft, hard, kit, rand, density = 1) {
   put(anywhere, N(34), 'mould', 0.5, 1.4, [0.6, 1.1], 0.16, -0.04, soft);
 
   // Where vehicles stood and stopped.
-  put(midRoad, N(34), 'oil', 0.7, 1.9, [0.6, 1.0], 0.12, -0.02, soft);
-  put(midRoad, N(26), 'scorch', 0.9, 2.3, [0.7, 1.1], 0.14, 0.02, soft);
+  put(midRoad, N(52), 'oil', 0.9, 2.6, [0.6, 1.0], 0.12, -0.02, soft);
+  put(midRoad, N(40), 'scorch', 1.2, 3.0, [0.7, 1.1], 0.14, 0.02, soft);
   put(midRoad, N(80), 'impactSpray', 0.8, 2.2, [0.8, 1.2], 0.14, 0.03, hard);
 
   return { count };
@@ -599,7 +599,7 @@ export function tyreTracks(ctx, site, bs, kit, rand, density = 1) {  // hard set
   const px = -uz, pz = ux;
 
   let count = 0;
-  const lanes = Math.round(5 * density);
+  const lanes = Math.round(9 * density);
   const drive = site.field((d) => (d > 9 || d < 3 ? 0 : 1));
   if (drive.empty) return { count: 0 };
   for (let lane = 0; lane < lanes; lane++) {
@@ -625,7 +625,7 @@ export function tyreTracks(ctx, site, bs, kit, rand, density = 1) {  // hard set
         const geo = kit.geo('tyre', rand);
         if (!geo) continue;
         const yaw = Math.atan2(ux, uz) + Math.PI / 2;
-        _c.setScalar(0.85 + 0.3 * fade);
+        _c.setScalar(0.72 + 0.3 * fade);
         onGround(bs, 'gun_polymer', geo, x, y, z, 2.4, 0.34 + rand() * 0.08, yaw, _c);
         count++;
       }

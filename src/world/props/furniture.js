@@ -52,11 +52,14 @@ function geo() {
     seat: cb(0.46, 0.5, 0.22, 0.05),
     engine: cb(0.9, 0.42, 0.62, 0.06),
 
-    // --- stall
-    tube: pipeGeo(0.028, 1, 6, false),
-    tubeAlong: pipeGeo(0.028, 1, 6, false).rotateZ(Math.PI / 2),
-    counter: cb(1, 0.07, 1, 0.015),
-    leg: cb(0.07, 1, 0.07, 0.014),
+    // --- stall. The first pass used 28 mm tube and a 70 mm shelf, which at
+    // 15 m is sub-pixel: the frame vanished and the goods on the counter read
+    // as crates floating in mid air. Scantlings are now visible ones.
+    tube: pipeGeo(0.05, 1, 7, false),
+    tubeAlong: pipeGeo(0.05, 1, 7, false).rotateZ(Math.PI / 2),
+    counter: cb(1, 0.1, 1, 0.02),
+    apron: cb(1, 0.52, 0.05, 0.012),
+    leg: cb(0.09, 1, 0.09, 0.016),
 
     // --- generic
     drum: pipeGeo(0.29, 0.88, 14, true, 0.045),
@@ -211,10 +214,16 @@ export function marketStall(bs, rand, x, y, z, yaw, colliders) {
     n++;
   }
 
-  // Counter and a plank top.
+  // Counter: a plank top, an apron board across the front, and four legs, so
+  // it reads as a table rather than as a floating shelf.
   jitterColor(_c, rand, 0.3, 0.09, 0.07);
-  put('wood_plank', g.counter, 0, 0.92, 0, 0, 0.01, w * 1.02, 1, d * 0.92, _c);
-  n++;
+  const wood = _c.clone();
+  put('wood_plank', g.counter, 0, 0.92, 0, 0, 0.01, w * 1.04, 1, d * 0.94, wood);
+  put('wood_plank', g.apron, 0, 0.62, d * 0.44, 0, 0, w * 1.02, 1, 1, wood);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    put('wood_plank', g.leg, sx * w * 0.44, 0.44, sz * d * 0.38, 0, 0, 1, 0.88, 1, wood, false);
+  }
+  n += 6;
   // Goods: crates and sacks on top.
   for (let i = 0, k = 2 + ((rand() * 4) | 0); i < k; i++) {
     const ox = (rand() - 0.5) * w * 0.8, oz = (rand() - 0.5) * d * 0.5;
@@ -231,7 +240,7 @@ export function marketStall(bs, rand, x, y, z, yaw, colliders) {
   }
 
   // Canopy: torn canvas over the top rails, pitched off to one side to shed.
-  const cloth = twoSided(layFlat(clothGeo(w * 1.2, d * 1.5, 0.16, rand, 0.2)));
+  const cloth = twoSided(layFlat(clothGeo(w * 1.28, d * 1.9, 0.2, rand, 0.24)));
   jitterColor(_c, rand, 0.24, 0.42, 0.1);
   _c.multiplyScalar(1.2);
   put('fabric_canvas', cloth, 0, h + 0.06, 0, 0.16, (rand() - 0.5) * 0.2, 1, 1, 1, _c);
