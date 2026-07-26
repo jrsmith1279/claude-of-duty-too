@@ -22,7 +22,7 @@ import * as THREE from 'three';
  * (props, vegetation, bots) land in the right place.
  */
 
-const FAR = 62;
+const FAR = 45;
 const SCALE = 0.25;
 const CLEAR = new THREE.Color(1e4, 0, 0);
 
@@ -119,9 +119,14 @@ export class DepthCapture {
     const still =
       this._prevCam.distanceToSquared(cam.position) < 1e-6 &&
       Math.abs(this._prevQuat.dot(cam.quaternion)) > 0.999995;
-    // Still camera: reuse forever. Moving camera: every other frame, which
-    // halves the average draw-call cost and is a sub-pixel error at 1/4 res.
-    if (this.frame > 1 && (still || (this.frame & 1))) return this.rt.texture;
+    // Still camera: reuse forever — which covers every screenshot and most of
+    // a firefight. Moving camera: amortise over N frames, chosen from what the
+    // pass actually cost last time, so a scene that has grown heavy degrades to
+    // a slightly stale depth buffer rather than to a draw-call blowout. At
+    // quarter resolution a frame or two of lag is a sub-pixel error on the
+    // *fade* of a particle edge; nothing about the image moves.
+    const interval = this.lastDrawCalls > 70 ? 4 : this.lastDrawCalls > 35 ? 2 : 1;
+    if (this.frame > 1 && (still || (interval > 1 && this.frame % interval))) return this.rt.texture;
     this._prevCam.copy(cam.position);
     this._prevQuat.copy(cam.quaternion);
 

@@ -135,6 +135,7 @@ export class FXSystem {
       smokeColumn: (pos, opts) => self.smoke.column(pos, opts),
       clear: () => self.clearAll(),
       setEnabled: (v) => { self.enabled = !!v; self.root.visible = !!v; },
+      setSoftParticles: (v) => { self.depth.enabled = !!v; if (!v) { self.lit.setDepth(null); self.add.setDepth(null); } },
       get stats() {
         return {
           lit: self.lit.used, additive: self.add.used, decals: self.decals.count,
@@ -599,6 +600,12 @@ export class FXSystem {
     _p.copy(camPos).addScaledVector(_right, 7).addScaledVector(_up, 2.4).addScaledVector(_fwd, 6);
     this._tracerToward(_v, _p, 850, 9.0, { width: 0.028, intensity: 4.2 });
 
+    // Return fire crossing the other way and low, so the frame has rounds going
+    // in both directions rather than one converging fan.
+    _v.copy(camPos).addScaledVector(_fwd, 4).addScaledVector(_right, 5.5).addScaledVector(_up, 0.1);
+    _p.copy(camPos).addScaledVector(_fwd, 26).addScaledVector(_right, -7.0).addScaledVector(_up, 0.9);
+    this._tracerToward(_v, _p, 900, 10.0, { width: 0.030, intensity: 5.2, color: [1.0, 0.9, 0.55] });
+
     // --- brass in the air ------------------------------------------------------
     for (let i = 0; i < 5; i++) {
       const f = i / 4;
@@ -659,7 +666,7 @@ export class FXSystem {
         .addScaledVector(_right, (Math.random() - 0.5) * d * 0.55)
         .addScaledVector(_up, (Math.random() - 0.35) * d * 0.22);
       const px = _p.x, py = _p.y, pz = _p.z;
-      const size = 0.012 + Math.random() * 0.05 * (d / 12);
+      const size = 0.010 + Math.random() * 0.030 * (d / 12);
       this._at(2 + Math.random() * 6, () => {
         const s = resetSpec();
         s.x = px; s.y = py; s.z = pz;
@@ -669,9 +676,9 @@ export class FXSystem {
         s.life = 30; s.drag = 0.2; s.gravity = 0.005; s.turb = 0.02;
         s.size0 = size; s.size1 = size * 1.3;
         s.tile = PT.SOFT; s.soft = 0.4;
-        s.r0 = 0.72; s.g0 = 0.69; s.b0 = 0.62;
-        s.r1 = 0.72; s.g1 = 0.69; s.b1 = 0.62;
-        s.a0 = 0.20; s.a1 = 0.20;
+        s.r0 = 0.55; s.g0 = 0.53; s.b0 = 0.48;
+        s.r1 = 0.55; s.g1 = 0.53; s.b1 = 0.48;
+        s.a0 = 0.11; s.a1 = 0.11;
         s.fadeIn = 0.02; s.fadeOut = 0.1;
         this.lit.spawn(s);
       });
