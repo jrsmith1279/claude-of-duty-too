@@ -174,8 +174,9 @@ export class Bot {
       ctx.physics.moveCharacter?.(this.capsule, _v0.set(0, 0, 0), 1 / 120);
     }
     this.anim.reset(this.position, this.yaw);
-    for (const m of this.meshes) m.visible = true;
-    this._syncBounds();
+    this._castShadow = true;
+    for (const m of this.meshes) { m.visible = true; m.castShadow = true; }
+    this._syncBounds(ctx);
     this.pivot.position.copy(this.position);
     this.pivot.rotation.set(0, this.yaw, 0);
     this.pivot.updateMatrixWorld(true);
@@ -468,13 +469,27 @@ export class Bot {
     this.pivot.position.copy(this.position);
     this.pivot.rotation.set(0, this.yaw, 0);
     this.pivot.updateMatrixWorld(true);
-    this._syncBounds();
+    this._syncBounds(ctx);
     if (this.muzzleFlash > 0) this.muzzleFlash -= dt;
   }
 
-  _syncBounds() {
+  _syncBounds(ctx) {
+    // Culling has to be told where a skinned mesh is: its bones carry the
+    // transform, its own matrix is identity, and three caches the first
+    // computed sphere for ever.
     for (const m of this.meshes) {
       m.boundingSphere.center.set(this.position.x, this.position.y + 0.95, this.position.z);
+    }
+    // A bot two blocks away contributes a few pixels of shadow and costs two
+    // draws in every cascade it touches. Past 34 m it stops casting.
+    const cam = ctx?.camera;
+    if (cam) {
+      const dx = cam.position.x - this.position.x, dz = cam.position.z - this.position.z;
+      const near = dx * dx + dz * dz < 34 * 34;
+      if (near !== this._castShadow) {
+        this._castShadow = near;
+        for (const m of this.meshes) m.castShadow = near;
+      }
     }
   }
 
@@ -694,7 +709,7 @@ export class Bot {
     this._ragLimb('leg', 'L', legL);
     this._ragLimb('leg', 'R', legR);
     this.pivot.updateMatrixWorld(true);
-    this._syncBounds();
+    this._syncBounds(ctx);
   }
 
   _ragLimb(kind, S, targetWorld) {
