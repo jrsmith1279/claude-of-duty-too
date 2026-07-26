@@ -38,8 +38,35 @@ export const SUN_DECLINATION = 14.0 * Math.PI / 180;
 export const MOON_DECLINATION = 22.0 * Math.PI / 180;
 /** Moon hour-angle lead over the sun: ~150 deg elongation, a waxing gibbous that clears the skyline at dusk. */
 export const MOON_HOUR_LEAD = 150.0 * Math.PI / 180;
-/** World bearing of true north, chosen so the mid-morning sun frames the skyline camera. */
-export const NORTH_OFFSET = -90.0 * Math.PI / 180;
+/**
+ * World bearing of true north. This is the map's compass orientation and it is an
+ * ART DIRECTION decision, not a physics one — it alone decides where the sun sits
+ * relative to the market street, and therefore the composition of every
+ * ground-level frame in the game.
+ *
+ * The street runs along Z (camera looks down -Z). At -90 deg the mid-morning sun
+ * came up almost exactly along -Z, so `street`, `ads`, `weapon`, `materials` and
+ * `skyline` all shot straight into the disk and clipped the far end of the
+ * corridor to flat white, with no shadow structure on the road at all.
+ *
+ * -25 deg puts the sun bearing at +66 deg from the street axis at tod 0.30 (the
+ * "MORNING RAID" primary look) and +71 deg at 0.32, elevation 23-28 deg. That is
+ * the rake ART_DIRECTION.md asks for:
+ *   - the disk sits well outside a 70 deg-fov frame looking down the street, so
+ *     nothing shoots into it;
+ *   - the sun is on the +X (east) side, so the west facades — including the room's
+ *     street-facing wall — are in hard sun while the east facades fall away into
+ *     sky-fill shadow, giving the warm-key / cool-fill separation;
+ *   - the east blocks cast across the 22.8 m facade-to-facade corridor, and their
+ *     staggered heights (10.5 / 15.5 / 8.0 / 19.0 m) put the road half in shadow
+ *     with a sunlit pool opening up mid-corridor behind the short 8 m block. That
+ *     lit/shadow split down the street floor is the money shot;
+ *   - light rakes into the west room's east-facing doorway, so `interior` gets a
+ *     real shaft against a dark interior instead of flat ambient.
+ * At golden hour (0.76) the same offset swings the low sun round to -X, giving
+ * the establishing camera a cross-frame raking key instead of a back-light.
+ */
+export const NORTH_OFFSET = -25.0 * Math.PI / 180;
 
 /** Scene radiance scale: turns unit solar irradiance into pre-tonemap linear units. */
 export const SKY_EXPOSURE = 24.0;
