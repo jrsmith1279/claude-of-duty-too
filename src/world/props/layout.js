@@ -85,6 +85,7 @@ export class Site {
     this.wallN = new Int8Array(n * 2);    // outward normal of the nearest wall
     this.corner = new Uint8Array(n);      // how many of 4 probes hit a wall
     this.indoor = new Uint8Array(n);      // roofed over
+    this.step = new Float32Array(n);      // biggest height step to a neighbour
     this.surf = new Array(n).fill('asphalt');
     this.taken = new Float32Array(n);     // radius of the prop occupying the cell
 
@@ -150,6 +151,26 @@ export class Site {
         this.gy[i] = f.y;
         this.surf[i] = f.surface;
         if (up) this.indoor[i] = 1;
+      }
+    }
+
+    // Kerbs, kerbstones and door thresholds are not obstructions, so the
+    // distance field is blind to them — but a gutter is exactly where silt
+    // collects, so height steps get their own channel.
+    for (let iz = 0; iz < nz; iz++) {
+      for (let ix = 0; ix < nx; ix++) {
+        const i = this.index(ix, iz);
+        if (!this.open[i]) continue;
+        let s = 0;
+        for (const [dx, dz] of DIRS) {
+          const jx = ix + dx, jz = iz + dz;
+          if (!this.inside(jx, jz)) continue;
+          const j = this.index(jx, jz);
+          if (!this.open[j]) continue;
+          const d = Math.abs(this.gy[j] - this.gy[i]);
+          if (d > s) s = d;
+        }
+        this.step[i] = s;
       }
     }
 
@@ -424,7 +445,7 @@ export class Site {
     for (let i = 0; i < n; i++) {
       if (!this.open[i]) continue;
       const ix = i % this.nx, iz = (i / this.nx) | 0;
-      const w = weight(this.dist[i], this.corner[i], this.surf[i], this.xOf(ix), this.zOf(iz), this.indoor[i]);
+      const w = weight(this.dist[i], this.corner[i], this.surf[i], this.xOf(ix), this.zOf(iz), this.indoor[i], this.step[i]);
       if (!(w > 0)) continue;
       total += w;
       idx.push(i);
@@ -441,7 +462,7 @@ export class Field {
     this.idx = idx;
     this.cum = cum;
     this.total = total;
-    this.out = { x: 0, y: 0, z: 0, dist: 0, corner: 0, surface: 'asphalt', nx: 0, nz: 0, indoor: 0 };
+    this.out = { x: 0, y: 0, z: 0, dist: 0, corner: 0, surface: 'asphalt', nx: 0, nz: 0, indoor: 0, step: 0 };
   }
 
   get empty() { return this.total <= 0; }
@@ -466,6 +487,7 @@ export class Field {
     o.corner = site.corner[i];
     o.surface = site.surf[i];
     o.indoor = site.indoor[i];
+    o.step = site.step[i];
     o.nx = site.wallN[i * 2];
     o.nz = site.wallN[i * 2 + 1];
     return o;

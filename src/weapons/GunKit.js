@@ -224,28 +224,45 @@ export function knurled(r, len, teeth = 18) {
 }
 
 /**
- * Curved box extruded along an arc — STANAG/AK magazines, curved grips.
- * `bend` is the total sweep in radians over the length.
+ * A curved body built as a stack of chamfered slices swept along an arc in the
+ * YZ plane, running downward from the origin. Used for magazines and grips.
+ *
+ * A single `ExtrudeGeometry` along an `extrudePath` would be tidier, but its
+ * Frenet frames are unstable for a nearly straight path and it cannot bevel,
+ * so the silhouette would come out with hard edges. Stacked slices give the
+ * curve *and* the horizontal witness ribs a real magazine has.
+ *
+ * @param w        width (X)
+ * @param depth    fore/aft thickness (Z)
+ * @param length   total length down -Y
+ * @param bend     total sweep in radians (positive curls the bottom forward)
+ * @param slices   number of ribs
  */
-export function curvedBox(w, thickness, length, bend, opts = {}) {
-  const seg = opts.steps ?? 10;
-  const pts = [];
-  const radius = Math.abs(bend) > 1e-4 ? length / bend : 1e6;
-  for (let i = 0; i <= seg; i++) {
-    const t = i / seg;
-    const a = (t - 0.5) * bend;
-    pts.push(new THREE.Vector3((Math.cos(a) - Math.cos(bend * 0.5)) * radius, 0, Math.sin(a) * radius));
+export function curvedStack(w, depth, length, bend, slices = 8, opts = {}) {
+  const parts = [];
+  const gap = opts.gap ?? 0.0006;
+  const seg = length / slices;
+  // Arc of radius R starting at the origin heading -Y and curling toward -Z:
+  //   tangent(t) = (0, -cos t, -sin t)   =>   p(t) = R * (0, -sin t, cos t - 1)
+  const R = Math.abs(bend) > 1e-4 ? length / bend : 1e7;
+  for (let i = 0; i < slices; i++) {
+    const u = (i + 0.5) / slices;
+    const t = u * bend;
+    const taper = 1 - (opts.taper ?? 0) * u;
+    const g = chamferBox(w * taper, seg - gap, depth * taper, {
+      r: opts.r ?? Math.min(w, depth) * 0.3,
+      bevel: opts.bevel ?? 0.0009,
+      curveSegments: opts.curveSegments ?? 2,
+    });
+    _e.set(t, 0, 0, 'XYZ');
+    _q.setFromEuler(_e);
+    _v.set(0, -R * Math.sin(t), R * (Math.cos(t) - 1));
+    _s.setScalar(1);
+    _m4.compose(_v, _q, _s);
+    g.applyMatrix4(_m4);
+    parts.push(prep(g));
   }
-  const path = new THREE.CatmullRomCurve3(pts);
-  const shape = roundedRect(w, thickness, opts.r ?? Math.min(w, thickness) * 0.28);
-  const g = new THREE.ExtrudeGeometry(shape, {
-    extrudePath: path,
-    steps: seg,
-    bevelEnabled: false,
-    curveSegments: opts.curveSegments ?? 3,
-  });
-  g.rotateX(-Math.PI / 2); // path runs along +Z; stand the magazine up along -Y
-  return g;
+  return mergeGeometries(parts, false);
 }
 
 // --------------------------------------------------------------------------

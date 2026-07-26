@@ -119,12 +119,13 @@ export class Compass {
       gd.addColorStop(1, 'rgba(0,0,0,0)');
       this._gradDark = gd;
     }
-    c.globalAlpha = a;
+    const prevAlpha = c.globalAlpha;
+    c.globalAlpha = prevAlpha * a;
     c.fillStyle = this._gradDark;
     c.fillRect(cx - halfW, y + 16 * k, halfW * 2, 1);
     c.fillStyle = this._grad;
     c.fillRect(cx - halfW, y + 15 * k, halfW * 2, 1);
-    c.globalAlpha = 1;
+    c.globalAlpha = prevAlpha;
 
     c.textAlign = 'center';
     c.textBaseline = 'alphabetic';
@@ -143,17 +144,15 @@ export class Compass {
         const label = CARDINALS[(norm / 45) | 0];
         const major = norm % 90 === 0;
         c.font = major ? this.fCard : this.fSub;
-        setTracking(c, 0.1, major ? 12.5 * k : 9.5 * k);
-        shadow(c, 5 * k, 0.65, 1);
-        c.fillStyle = rgba(major ? PAL.white : PAL.dim, (major ? 0.9 : 0.55) * fade * a);
+        setTracking(c, 0.12, major ? 14 * k : 10.5 * k);
+        shadow(c, 5 * k, 0.8, 1);
+        c.fillStyle = rgba(major ? PAL.white : PAL.dim, (major ? 0.95 : 0.62) * fade * a);
         c.fillText(label, x, y + 10 * k);
         clearTracking(c);
         noShadow(c);
-        c.fillStyle = rgba(PAL.white, 0.4 * fade * a);
-        c.fillRect(Math.round(x), y + 15 * k, 1, 4 * k);
+        this._tick(c, x, y + 15 * k, 5.5 * k, k, 0.62 * fade * a);
       } else {
-        c.fillStyle = rgba(PAL.white, 0.26 * fade * a);
-        c.fillRect(Math.round(x), y + 15 * k, 1, 3 * k);
+        this._tick(c, x, y + 15 * k, 3.5 * k, k, 0.42 * fade * a);
       }
     }
 
@@ -176,11 +175,21 @@ export class Compass {
     }
 
     // Heading marker.
-    shadow(c, 4 * k, 0.7, 1);
+    shadow(c, 4 * k, 0.85, 1);
     c.fillStyle = rgba(PAL.white, 0.95 * a);
     triangle(c, cx, y + 19.5 * k, 7 * k, 5 * k, false);
     c.fill();
     noShadow(c);
     c.textAlign = 'left';
+  }
+
+  /** A tick is two rects: black shoulder, then the light mark over it. */
+  _tick(c, x, y, len, k, alpha) {
+    if (alpha <= 0.01) return;
+    const px = Math.round(x);
+    c.fillStyle = rgba(PAL.ink, Math.min(0.8, alpha * 1.25));
+    c.fillRect(px - 1, y, 3, len + 1);
+    c.fillStyle = rgba(PAL.white, alpha);
+    c.fillRect(px, y, 1, len);
   }
 }

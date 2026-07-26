@@ -103,6 +103,18 @@ export class Killfeed {
       c.textAlign = 'right';
       c.font = this.fName;
       setTracking(c, 0.1, 11 * k);
+
+      // A kill of your own gets a faint highlight rule *behind* the row. It has
+      // to be measured before anything is drawn, hence the dry-run measure.
+      if (r.mine) {
+        const wv = c.measureText(r.victim).width;
+        const wk = c.measureText(r.killer).width;
+        const total = wv + wk + 22 * k + 16 * k;
+        noShadow(c);
+        c.fillStyle = rgba(PAL.friend, 0.10 * a);
+        roundRect(c, x - total - 7 * k, y - 9.5 * k, total + 14 * k, 19 * k, 2 * k);
+        c.fill();
+      }
       shadow(c, 5 * k, 0.7, 1);
 
       const victimCol = r.victimIsMe ? PAL.danger : PAL.dim;
@@ -117,16 +129,7 @@ export class Killfeed {
       const kx = gx - 8 * k;
       c.fillStyle = rgba(r.mine ? PAL.friend : PAL.dim, (r.mine ? 0.98 : 0.75) * a);
       c.fillText(r.killer, kx, y);
-      const kw = c.measureText(r.killer).width;
       clearTracking(c);
-
-      // A kill of your own gets a faint highlight rule under the row.
-      if (r.mine) {
-        noShadow(c);
-        c.fillStyle = rgba(PAL.friend, 0.12 * a);
-        roundRect(c, kx - kw - 6 * k, y - 9 * k, kw + vw + glyphW + 28 * k, 18 * k, 2 * k);
-        c.fill();
-      }
       noShadow(c);
     }
     c.textAlign = 'left';

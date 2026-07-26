@@ -184,6 +184,9 @@ export class HUDSystem {
 
   /** One call that lights up every widget, for eyeballing the layout. */
   _demo() {
+    if (!this.ctx.weapons?.current) {
+      this._demoWeapon = { id: 'm4', name: 'M4A1', fireMode: 'auto', ammo: { mag: 17, reserve: 120, magSize: 30 } };
+    }
     this.killfeed.push({ killer: 'YOU', victim: 'BRAVO-3', weapon: 'm4', headshot: true, mine: true });
     this.killfeed.push({ killer: 'ALPHA-1', victim: 'BRAVO-6', weapon: 'mp5' });
     this.killfeed.push({ killer: 'BRAVO-2', victim: 'ALPHA-4', weapon: 'm870' });
@@ -329,12 +332,16 @@ export class HUDSystem {
     }
 
     const w = ctx.weapons;
-    const cur = w?.current;
+    let cur = w?.current;
+    // Preview scaffolding: with no weapon system yet there is nothing to draw
+    // in the ammo block, so the layout could not be reviewed. Only ever active
+    // under the preview flag, which the screenshot harness never sets.
+    if (!cur && this._demoWeapon) cur = this._demoWeapon;
     s.hasWeapon = !!cur;
     if (cur) {
       s.weaponName = cur.displayName || cur.name || cur.id || '';
-      s.fireMode = w.fireMode || cur.fireMode || cur.mode || '';
-      const ammo = w.ammo || cur.ammo || null;
+      s.fireMode = w?.fireMode || cur.fireMode || cur.mode || '';
+      const ammo = w?.ammo || cur.ammo || null;
       s.mag = ammo?.mag ?? cur.mag ?? 0;
       s.reserve = ammo?.reserve ?? cur.reserve ?? 0;
       s.magSize = ammo?.magSize ?? cur.magSize ?? cur.def?.mag ?? cur.magazine ?? Math.max(s.mag, 1);
