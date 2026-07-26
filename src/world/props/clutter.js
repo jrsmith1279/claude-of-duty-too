@@ -147,40 +147,60 @@ function pools() {
     // Grit.
     grit: variants(6, (i) => lumpGeo(0.038, 0.55, [1, 0.55, 1], 0, i * 17 + 3)),
     pebble: variants(5, (i) => lumpGeo(0.075, 0.6, [1, 0.6, 1.1], 0, i * 23 + 7)),
-    // Mound cores for rubble piles.
-    mound: variants(4, (i) => lumpGeo(1, 0.34, [1, 0.42, 0.9], 1, i * 31 + 13)),
+    // Mound cores. Detail 2 rather than 1: a heap is metres across and an
+    // 80-triangle dome at that size shows every facet, and worse, gives the
+    // shadow map enough normal variation across one texel to band.
+    mound: variants(4, (i) => lumpGeo(1, 0.26, [1, 0.5, 0.9], 2, i * 31 + 13)),
   };
   return POOL;
 }
 
 /**
- * Material per shape, and how far its albedo is allowed to drift. Concrete
- * debris in a dust-covered street is never one tone — rule 5.
- */
+ * Material per shape, how far its albedo is allowed to drift, and how it lands.
+ *
+ *   value/hue/warm  spread of the per-piece vertex tint — rule 5, no two the same
+ *   tone            base multiplier on that tint. Masonry debris in a dusty
+ *                   street is pale buff, and every generator here is authored
+ *                   for a *surface*, which is uniformly darker than its own
+ *                   spall. Without this every chunk reads as coal.
+ *   flat            1 = lies down (a plank, a sheet), 0 = lands any way up
+ *   h               nominal height in metres, so a piece can be bedded into the
+ *                   ground by a fraction of its own size instead of floating
+ * */
 const KINDS = {
-  chunk: { key: 'rubble', value: 0.3, hue: 0.05, warm: 0.05, flat: 0.25, shadow: 1 },
-  chunkBig: { key: 'rubble', value: 0.26, hue: 0.05, warm: 0.04, flat: 0.2, shadow: 1 },
-  slab: { key: 'concrete_floor', value: 0.24, hue: 0.03, warm: 0.02, flat: 0.85, shadow: 1 },
-  slabSmall: { key: 'concrete_floor', value: 0.26, hue: 0.04, warm: 0.02, flat: 0.8, shadow: 1 },
-  brick: { key: 'brick', value: 0.3, hue: 0.09, warm: 0.1, flat: 0.55, shadow: 1 },
-  brickHalf: { key: 'brick', value: 0.32, hue: 0.1, warm: 0.09, flat: 0.5, shadow: 0 },
-  plaster: { key: 'plaster', value: 0.28, hue: 0.04, warm: 0.05, flat: 0.75, shadow: 0 },
-  splinter: { key: 'wood_plank', value: 0.34, hue: 0.07, warm: 0.06, flat: 0.7, shadow: 0 },
-  plank: { key: 'wood_plank', value: 0.3, hue: 0.07, warm: 0.05, flat: 0.9, shadow: 1 },
-  card: { key: 'plywood', value: 0.3, hue: 0.06, warm: 0.07, flat: 0.92, shadow: 0 },
-  paper: { key: 'plaster', value: 0.16, hue: 0.02, warm: 0.02, flat: 0.95, shadow: 0 },
-  twist: { key: 'metal_rusted', value: 0.36, hue: 0.1, warm: 0.09, flat: 0.6, shadow: 0 },
-  rebar: { key: 'metal_rusted', value: 0.34, hue: 0.09, warm: 0.08, flat: 0.75, shadow: 0 },
-  can: { key: 'metal_painted', value: 0.42, hue: 0.22, warm: 0.0, flat: 0.8, shadow: 0 },
-  tile: { key: 'tile_roof', value: 0.3, hue: 0.08, warm: 0.08, flat: 0.7, shadow: 0 },
-  grit: { key: 'gravel', value: 0.3, hue: 0.04, warm: 0.03, flat: 0.4, shadow: 0 },
-  pebble: { key: 'gravel', value: 0.3, hue: 0.05, warm: 0.03, flat: 0.4, shadow: 0 },
-  mound: { key: 'rubble', value: 0.18, hue: 0.03, warm: 0.04, flat: 0.0, shadow: 1 },
+  chunk: { key: 'rubble', value: 0.3, hue: 0.05, warm: 0.06, tone: 1.16, flat: 0.25, h: 0.2, shadow: 1 },
+  chunkBig: { key: 'rubble', value: 0.26, hue: 0.05, warm: 0.05, tone: 1.14, flat: 0.2, h: 0.42, shadow: 1 },
+  slab: { key: 'concrete_floor', value: 0.24, hue: 0.03, warm: 0.03, tone: 1.12, flat: 0.85, h: 0.1, shadow: 1 },
+  slabSmall: { key: 'concrete_floor', value: 0.26, hue: 0.04, warm: 0.03, tone: 1.12, flat: 0.8, h: 0.06, shadow: 1 },
+  brick: { key: 'brick', value: 0.3, hue: 0.09, warm: 0.1, tone: 1.08, flat: 0.55, h: 0.07, shadow: 0 },
+  brickHalf: { key: 'brick', value: 0.32, hue: 0.1, warm: 0.09, tone: 1.08, flat: 0.5, h: 0.07, shadow: 0 },
+  plaster: { key: 'plaster', value: 0.28, hue: 0.04, warm: 0.07, tone: 0.9, flat: 0.75, h: 0.09, shadow: 0 },
+  splinter: { key: 'wood_plank', value: 0.34, hue: 0.07, warm: 0.06, tone: 1.0, flat: 0.7, h: 0.05, shadow: 0 },
+  plank: { key: 'wood_plank', value: 0.3, hue: 0.07, warm: 0.05, tone: 1.0, flat: 0.9, h: 0.03, shadow: 0 },
+  card: { key: 'plywood', value: 0.3, hue: 0.06, warm: 0.07, tone: 0.94, flat: 0.92, h: 0.02, shadow: 0 },
+  paper: { key: 'plaster', value: 0.16, hue: 0.02, warm: 0.03, tone: 0.86, flat: 0.95, h: 0.01, shadow: 0 },
+  twist: { key: 'metal_rusted', value: 0.36, hue: 0.1, warm: 0.1, tone: 1.05, flat: 0.6, h: 0.04, shadow: 0 },
+  rebar: { key: 'metal_rusted', value: 0.34, hue: 0.09, warm: 0.09, tone: 1.0, flat: 0.75, h: 0.03, shadow: 0 },
+  can: { key: 'metal_painted', value: 0.42, hue: 0.22, warm: 0.0, tone: 1.0, flat: 0.8, h: 0.05, shadow: 0 },
+  tile: { key: 'tile_roof', value: 0.3, hue: 0.08, warm: 0.08, tone: 1.05, flat: 0.7, h: 0.05, shadow: 0 },
+  grit: { key: 'gravel', value: 0.3, hue: 0.04, warm: 0.04, tone: 1.1, flat: 0.4, h: 0.05, shadow: 0 },
+  pebble: { key: 'gravel', value: 0.3, hue: 0.05, warm: 0.04, tone: 1.1, flat: 0.4, h: 0.09, shadow: 0 },
+  mound: { key: 'rubble', value: 0.14, hue: 0.03, warm: 0.06, tone: 1.2, flat: 0.0, h: 1, shadow: 1 },
+  berm: { key: 'sand', value: 0.16, hue: 0.04, warm: 0.1, tone: 1.06, flat: 0.0, h: 1, shadow: 0 },
 };
 
+/** Per-piece tint: jitter about the kind's base tone. */
+function tintFor(kind, rand, extraWarm = 0) {
+  const k = KINDS[kind];
+  jitterColor(_c, rand, k.value, k.hue, k.warm + extraWarm);
+  _c.multiplyScalar(k.tone);
+  return _c;
+}
+
 /**
- * Drops one piece with a plausible resting pose. `flat` biases how far a shape
- * is allowed to tip: a plank lies down, a lump can land any way up.
+ * Drops one piece with a plausible resting pose. `sink` is the fraction of the
+ * piece's own height buried in whatever it landed on — nothing in a street
+ * balances on a single contact point.
  */
 function drop(bs, kind, geo, x, y, z, rand, scale, sink = 0.3, tint = 0) {
   const k = KINDS[kind];
@@ -188,9 +208,9 @@ function drop(bs, kind, geo, x, y, z, rand, scale, sink = 0.3, tint = 0) {
   const rx = (rand() - 0.5) * Math.PI * lean + (rand() - 0.5) * 0.28;
   const rz = (rand() - 0.5) * Math.PI * lean + (rand() - 0.5) * 0.28;
   const ry = rand() * Math.PI * 2;
-  jitterColor(_c, rand, k.value, k.hue, k.warm + tint);
+  tintFor(kind, rand, tint);
   const s = scale;
-  bs.add(k.key, geo, x, y - sink * 0.02 * s, z, rx, ry, rz, s, s * (0.8 + rand() * 0.45), s, _c, !!k.shadow);
+  bs.add(k.key, geo, x, y - sink * k.h * s, z, rx, ry, rz, s, s * (0.8 + rand() * 0.45), s, _c, !!k.shadow);
 }
 
 // ------------------------------------------------------------------- scatter
@@ -271,48 +291,54 @@ export function scatterGround(ctx, site, bs, rand, density = 1) {
  * rebar and slabs breaking the outline. Placed against wall bases and in
  * corners, where a collapse would actually have dumped its material.
  */
-export function rubblePiles(ctx, site, bs, rand, density = 1, count = 22) {
+export function rubblePiles(ctx, site, bs, rand, density = 1, count = 26) {
   pools();
   const P = POOL;
+  // Collapses happen at buildings, not in the middle of the carriageway; a heap
+  // sitting in open road reads as a set-dressing mistake, so gate hard on
+  // distance-to-wall instead of merely weighting it.
   const field = site.field((d, corner, surf, x, z, indoor) =>
-    (d > 12 ? 0 : 1) * (wallFalloff(d, 1.6, 0.02) + corner * 0.9 + (indoor ? 0.25 : 0)));
+    (d > 4.5 ? 0 : 1) * (wallFalloff(d, 1.5, 0.02) + corner * 1.1 + (indoor ? 0.3 : 0)));
   if (field.empty) return { piles: 0, pieces: 0 };
 
   let piles = 0, pieces = 0;
   const want = Math.round(count * density);
-  for (let attempt = 0; attempt < want * 14 && piles < want; attempt++) {
+  for (let attempt = 0; attempt < want * 16 && piles < want; attempt++) {
     const p = field.sample(rand);
     if (!p) break;
-    const rw = 0.9 + rand() * 1.9;
-    if (!site.free(p.x, p.z, rw * 0.75)) continue;
-    site.occupy(p.x, p.z, rw * 0.8);
+    const rw = 0.6 + rand() * 1.15;
+    if (!site.free(p.x, p.z, rw * 0.7)) continue;
+    site.occupy(p.x, p.z, rw * 0.75);
     piles++;
 
-    const h = rw * (0.26 + rand() * 0.26);
+    const h = rw * (0.2 + rand() * 0.22);
     const yaw = rand() * Math.PI * 2;
     // Pull the mound toward the wall it fell off, if there is one.
-    const cx = p.x + p.nx * rw * 0.18, cz = p.z + p.nz * rw * 0.18;
+    const cx = p.x + p.nx * rw * 0.22, cz = p.z + p.nz * rw * 0.22;
 
-    jitterColor(_c, rand, 0.16, 0.03, 0.05);
-    bs.add('rubble', pick(P.mound, rand), cx, p.y + h * 0.42, cz,
-      0, yaw, 0, rw, h * 2.1, rw * (0.75 + rand() * 0.5), _c, true);
+    // The core is bedded low and stays mostly hidden: it is a support surface
+    // for the chunks, not the silhouette. A visible smooth dome reads as a rock.
+    tintFor('mound', rand);
+    bs.add('rubble', pick(P.mound, rand), cx, p.y + h * 0.18, cz,
+      0, yaw, 0, rw, h * 1.7, rw * (0.75 + rand() * 0.5), _c, true);
     pieces++;
 
     // Chunks bedded over the mound surface, densest at the crown.
-    const n = Math.round((16 + rw * 16) * density);
+    const n = Math.round((26 + rw * 34) * density);
     for (let i = 0; i < n; i++) {
       const a = rand() * Math.PI * 2;
       const t = Math.sqrt(rand());
-      const r = t * rw * 0.98;
-      const y = p.y + h * (1 - t * t) * (0.55 + rand() * 0.75);
+      const r = t * rw * 1.05;
+      const y = p.y + h * (1 - t * t) * (0.5 + rand() * 0.85);
       const x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
       const roll = rand();
-      if (roll < 0.42) drop(bs, 'chunk', pick(P.chunk, rand), x, y, z, rand, 0.5 + rand() * 0.9, 0);
-      else if (roll < 0.6) drop(bs, 'brickHalf', pick(P.brickHalf, rand), x, y, z, rand, 0.8 + rand() * 0.5, 0);
-      else if (roll < 0.74) drop(bs, 'plaster', pick(P.plaster, rand), x, y, z, rand, 0.7 + rand() * 0.8, 0);
-      else if (roll < 0.86) drop(bs, 'slabSmall', pick(P.slabSmall, rand), x, y, z, rand, 0.6 + rand() * 0.7, 0);
-      else if (roll < 0.94) drop(bs, 'chunkBig', pick(P.chunkBig, rand), x, y, z, rand, 0.4 + rand() * 0.55, 0);
-      else drop(bs, 'grit', pick(P.pebble, rand), x, y, z, rand, 0.8 + rand() * 0.9, 0);
+      if (roll < 0.34) drop(bs, 'chunk', pick(P.chunk, rand), x, y, z, rand, 0.45 + rand() * 0.85, 0.15);
+      else if (roll < 0.54) drop(bs, 'brickHalf', pick(P.brickHalf, rand), x, y, z, rand, 0.8 + rand() * 0.6, 0.15);
+      else if (roll < 0.68) drop(bs, 'plaster', pick(P.plaster, rand), x, y, z, rand, 0.7 + rand() * 0.9, 0.15);
+      else if (roll < 0.8) drop(bs, 'slabSmall', pick(P.slabSmall, rand), x, y, z, rand, 0.6 + rand() * 0.8, 0.15);
+      else if (roll < 0.87) drop(bs, 'chunkBig', pick(P.chunkBig, rand), x, y, z, rand, 0.35 + rand() * 0.5, 0.2);
+      else if (roll < 0.94) drop(bs, 'brick', pick(P.brick, rand), x, y, z, rand, 0.9 + rand() * 0.25, 0.15);
+      else drop(bs, 'pebble', pick(P.pebble, rand), x, y, z, rand, 0.8 + rand() * 0.9, 0.2);
       pieces++;
     }
 
@@ -322,7 +348,7 @@ export function rubblePiles(ctx, site, bs, rand, density = 1, count = 22) {
     for (let i = 0; i < bars; i++) {
       const a = rand() * Math.PI * 2;
       const r = rand() * rw * 0.7;
-      jitterColor(_c, rand, 0.3, 0.09, 0.1);
+      tintFor('rebar', rand);
       bs.add('metal_rusted', pick(P.rebar, rand),
         cx + Math.cos(a) * r, p.y + h * (0.7 + rand() * 0.9), cz + Math.sin(a) * r,
         (rand() - 0.5) * 1.6, rand() * 6.28, (rand() - 0.5) * 1.6,
@@ -335,7 +361,7 @@ export function rubblePiles(ctx, site, bs, rand, density = 1, count = 22) {
     for (let i = 0; i < plates; i++) {
       const a = rand() * Math.PI * 2;
       const r = rw * (0.4 + rand() * 0.5);
-      jitterColor(_c, rand, 0.22, 0.03, 0.02);
+      tintFor('slab', rand);
       bs.add('concrete_floor', pick(P.slab, rand),
         cx + Math.cos(a) * r, p.y + h * (0.35 + rand() * 0.7), cz + Math.sin(a) * r,
         (rand() - 0.5) * 1.1, a + (rand() - 0.5), (rand() - 0.5) * 1.1,
@@ -386,28 +412,41 @@ export function wallDrifts(ctx, site, bs, rand, density = 1) {
 }
 
 /**
- * Dust and sand drifts: broad, low, soft mounds of dirt that sit *under* the
- * hard debris and give the ground a second material. Without these the street
- * is one asphalt tone with stones on it.
+ * Sand berms in the angle where a wall meets the ground.
+ *
+ * These used to be broad flat drifts out in the road and they were a mistake
+ * twice over: a two-metre dome squashed to 80 mm has enough normal variation
+ * inside one shadow-map texel to band the whole foreground with acne, and a
+ * dust *patch* is a decal's job, not geometry's. What geometry is genuinely
+ * needed for is the small triangular fillet against a wall base, which a
+ * projected quad cannot produce because it has to bridge two surfaces.
  */
-export function dustDrifts(ctx, site, bs, rand, density = 1, count = 60) {
+export function wallBerms(ctx, site, bs, rand, density = 1) {
   pools();
   const P = POOL;
-  const field = site.field((d, corner, surf, x, z, indoor, step) =>
-    (d > 14 ? 0 : 1) * (wallFalloff(d, 2.2, 0.05) + step * 3 + corner * 0.5));
-  if (field.empty) return { pieces: 0 };
   let pieces = 0;
-  const want = Math.round(count * density);
-  for (let i = 0; i < want; i++) {
-    const p = field.sample(rand);
-    if (!p) break;
-    const r = 0.7 + rand() * 2.6;
-    const h = 0.035 + rand() * 0.075;
-    jitterColor(_c, rand, 0.2, 0.05, 0.13);
-    bs.add(rand() < 0.5 ? 'sand' : 'dirt', pick(P.mound, rand),
-      p.x, p.y + h * 0.28, p.z, 0, rand() * 6.28, 0,
-      r, h * 2.4, r * (0.55 + rand() * 0.8), _c, false);
-    pieces++;
+  for (const f of site.facades) {
+    const len = Math.hypot(f.bx - f.ax, f.bz - f.az);
+    if (len < 2.5) continue;
+    const ux = (f.bx - f.ax) / (len || 1), uz = (f.bz - f.az) / (len || 1);
+    const n = Math.round(len * 0.42 * density);
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.15 + rand() * 0.7) / Math.max(1, n);
+      const r = 0.45 + rand() * 0.85;
+      const h = 0.05 + rand() * 0.085;
+      const off = 0.05 + rand() * 0.18;
+      const x = f.ax + ux * len * t + f.nx * off;
+      const z = f.az + uz * len * t + f.nz * off;
+      const y = site.groundAt(x, z);
+      if (y === null) continue;
+      tintFor('berm', rand);
+      // Long axis follows the wall, short axis rolls out into the street.
+      const along = Math.atan2(ux, uz);
+      bs.add(rand() < 0.55 ? 'sand' : 'dirt', pick(P.mound, rand),
+        x, y + h * 0.1, z, 0, along, 0,
+        r * (1.1 + rand() * 1.4), h * 1.9, r * 0.72, _c, false);
+      pieces++;
+    }
   }
   return { pieces };
 }
