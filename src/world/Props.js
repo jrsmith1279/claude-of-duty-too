@@ -218,7 +218,7 @@ export class PropSystem {
     pieces += rooftops(ctx, site, core, rand, 1, env).parts;
     pieces += awnings(ctx, site, core, rand, 1, env).parts;
     pieces += overheadLines(ctx, site, core, rand, 1, env).parts;
-    pieces += fireEscape(ctx, site, core, rand).parts;
+    pieces += fireEscape(ctx, site, core, rand, env).parts;
     const furniture = streetFurniture(ctx, site, core, rand, 1, env);
     pieces += furniture.parts;
     this._colliders = furniture.colliders;
