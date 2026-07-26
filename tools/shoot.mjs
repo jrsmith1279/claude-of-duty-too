@@ -471,7 +471,12 @@ async function main() {
     // Screen-space rectangles for anything a pixel check needs to find but
     // cannot segment from the image — today that is the bots. Projected here,
     // while the camera that took the frame is still the live camera.
-    if (CHECK) {
+    // ONLY where combat was staged. Bots persist in the scene after
+    // stageCombat(), so projecting them into read5 — a 5 m wall close-up —
+    // produced boxes sitting on a sunlit facade with no bot behind them and a
+    // bot-vs-background delta of MINUS 5.8. A check that reports on a soldier
+    // who is not in the frame is worse than no check.
+    if (CHECK && s.action) {
       probes[name] = await page.evaluate(() => {
         const api = window.__COD__;
         const cam = api?.ctx?.camera;
