@@ -29,18 +29,30 @@ import { wallFalloff } from './layout.js';
  * point across an atlas cell boundary and smear one decal into the next.
  */
 
-const ATLAS_SIZE = 1024;
-const CELLS = 4;
-const CELL = ATLAS_SIZE / CELLS;      // 256
-const PAD = 16;
+/**
+ * 5x5 cells at 2048, not 4x4 at 1024.
+ *
+ * The old atlas was full — all sixteen cells used — and the ground work needs
+ * nine more marks that cannot be faked with the existing ones. Going to 2048
+ * buys those nine *and* renders the original sixteen at 409 px instead of 256,
+ * which incidentally sharpens `grimeBand` and `tyre`; both were visibly soft at
+ * the 2-3 m world sizes they are placed at. About +22 MB with mips against a
+ * 700 MB budget, and not one extra draw call or shader program: same texture,
+ * same material key, same two buckets.
+ */
+const ATLAS_SIZE = 2048;
+const CELLS = 5;
+const CELL = Math.floor(ATLAS_SIZE / CELLS);   // 409
+const PAD = 24;
 
 const _c = new THREE.Color();
 
 export const DECAL_KEYS = [
-  'impact', 'impactCluster', 'impactSpray', 'crackWeb',
-  'scorch', 'oil', 'dust', 'wet',
-  'streak', 'grimeBand', 'drip', 'mould',
-  'tyre', 'poster', 'tagA', 'tagB',
+  'impact', 'impactCluster', 'impactSpray', 'crackWeb', 'scorch',
+  'oil', 'dust', 'wet', 'streak', 'grimeBand',
+  'drip', 'mould', 'tyre', 'poster', 'tagA',
+  'tagB', 'contact', 'damp', 'drain', 'wheelPath',
+  'tarSeam', 'patch', 'paintLine', 'gritDrift', 'leafDrift',
 ];
 
 // ------------------------------------------------------------------- atlas
@@ -377,6 +389,274 @@ function drawCell(g, name, rnd) {
       erode(g, cx, cy, s * 0.55, 10, 0.3, rnd);
       break;
     }
+    // ------------------------------------------------------------ ground work
+
+    case 'contact': {
+      // The single most valuable cell in the atlas: the occlusion patch that
+      // goes under every prop and every readable piece of debris.
+      //
+      // It is NOT a shadow. A shadow moves with the sun and vanishes in shade,
+      // and an object whose only grounding cue is its shadow reads as pasted on
+      // the moment it stands in shadow itself — which, in a street with one
+      // side in hard sun, is half the props in frame. This is ambient
+      // occlusion: the sky the ground cannot see because the object is in the
+      // way. So it is pure black, it is strongest dead centre, and it must live
+      // in the SOFT blended set. Alpha-testing it at 0.45 would clip the
+      // gradient into a hard-edged disc, which is worse than nothing.
+      const R = CELL * 0.46;
+      const grd = g.createRadialGradient(cx, cy, 0, cx, cy, R);
+      for (let i = 0; i <= 8; i++) {
+        const t = i / 8;
+        grd.addColorStop(t, rgba(0, 0, 0, 0.80 * Math.pow(1 - t, 2.4)));
+      }
+      g.fillStyle = grd;
+      g.beginPath();
+      g.arc(cx, cy, R, 0, 6.2832);
+      g.fill();
+      // A disc is a disc. Twelve bites make the perimeter irregular so a
+      // hundred of these on one street do not read as a hundred circles.
+      erode(g, cx, cy, R * 0.92, 12, 0.55, rnd);
+      break;
+    }
+
+    case 'damp': {
+      // Multiply toward #4a4a4e. Damp is not dark *paint*, it is a roughness
+      // change with a small albedo drop, so the colour here is deliberately
+      // near-neutral and the work is done by the bucket's roughness override.
+      blob(g, cx, cy, s * 0.5, 74, 74, 78, 0.72);
+      for (let i = 0; i < 14; i++) {
+        const a = rnd() * 6.2832, d = s * rnd() * 0.36;
+        blob(g, cx + Math.cos(a) * d, cy + Math.sin(a) * d,
+          s * (0.12 + rnd() * 0.26), 66, 67, 72, 0.42);
+      }
+      erode(g, cx, cy, s * 0.52, 22, 0.5, rnd);
+      break;
+    }
+
+    case 'drain': {
+      // Cast-iron gully grate. Reads at 6 m and it is one of the few objects a
+      // viewer can size the whole street against, so the frame is deliberately
+      // heavy and the slots are deliberately near-black.
+      const w = s * 0.72, h = s * 0.52;
+      const x0 = cx - w / 2, y0 = cy - h / 2;
+      g.fillStyle = rgba(58, 55, 50, 0.98);
+      g.fillRect(x0, y0, w, h);
+      // Worn arris: the top edge of a grate is polished by tyres.
+      g.fillStyle = rgba(126, 122, 114, 0.75);
+      g.fillRect(x0, y0, w, h * 0.055);
+      g.fillStyle = rgba(96, 92, 85, 0.6);
+      g.fillRect(x0, y0 + h - h * 0.05, w, h * 0.05);
+      const slots = 6;
+      for (let i = 0; i < slots; i++) {
+        const sw = w * 0.86 / slots * 0.58;
+        const sx = x0 + w * 0.07 + (i + 0.21) * (w * 0.86 / slots);
+        g.fillStyle = rgba(9, 9, 9, 0.97);
+        g.fillRect(sx, y0 + h * 0.15, sw, h * 0.7);
+        g.fillStyle = rgba(104, 99, 90, 0.5);
+        g.fillRect(sx, y0 + h * 0.15, sw, h * 0.035);
+      }
+      // Silt and staining creeping out of it.
+      blob(g, cx, cy, s * 0.46, 44, 42, 38, 0.3);
+      erode(g, cx, cy, s * 0.5, 8, 0.22, rnd);
+      break;
+    }
+
+    case 'wheelPath': {
+      // Where the tyres run, the road is polished rather than dirtied: the
+      // aggregate is worn smooth and the fines are gone, so the band is
+      // *lighter* and smoother than the tarmac either side of it. This is the
+      // cue that says a road is driven on, and it is completely absent today.
+      const bandY = PAD + s * 0.26, bandH = s * 0.48;
+      const grd = g.createLinearGradient(0, bandY, 0, bandY + bandH);
+      grd.addColorStop(0, rgba(150, 146, 138, 0));
+      grd.addColorStop(0.3, rgba(150, 146, 138, 0.34));
+      grd.addColorStop(0.7, rgba(150, 146, 138, 0.34));
+      grd.addColorStop(1, rgba(150, 146, 138, 0));
+      g.fillStyle = grd;
+      g.fillRect(PAD, bandY, s, bandH);
+      // Longitudinal streaking inside the band.
+      for (let i = 0; i < 22; i++) {
+        const y = bandY + rnd() * bandH;
+        const hgt = 1 + rnd() * 5;
+        const x0 = PAD + rnd() * s * 0.5;
+        g.fillStyle = rgba(168, 163, 152, 0.16 + rnd() * 0.18);
+        g.fillRect(x0, y, s * (0.15 + rnd() * 0.5), hgt);
+      }
+      // Abraded ends, so a run of these does not read as one long sticker.
+      g.save();
+      g.globalCompositeOperation = 'destination-out';
+      for (const end of [PAD, PAD + s]) {
+        const eg = g.createLinearGradient(end, 0, end + (end === PAD ? s * 0.22 : -s * 0.22), 0);
+        eg.addColorStop(0, rgba(0, 0, 0, 1));
+        eg.addColorStop(1, rgba(0, 0, 0, 0));
+        g.fillStyle = eg;
+        g.fillRect(end === PAD ? PAD : PAD + s * 0.78, PAD, s * 0.22, s);
+      }
+      g.restore();
+      erode(g, cx, cy, s * 0.5, 14, 0.3, rnd);
+      break;
+    }
+
+    case 'tarSeam': {
+      // A crack-sealing bead. Bitumen poured into a routed crack: near-black,
+      // markedly smoother than the road, and it bulges irregularly where it was
+      // over-filled. Longitudinal seams down a carriageway are one of the most
+      // reliable "this is a real road" signals in any reference frame.
+      const midY = PAD + s * 0.5;
+      g.fillStyle = rgba(17, 16, 16, 0.93);
+      g.beginPath();
+      const steps = 26;
+      for (let i = 0; i <= steps; i++) {
+        const x = PAD + (i / steps) * s;
+        const t = i / steps;
+        const bulge = s * (0.055 + 0.045 * Math.abs(Math.sin(t * 9.3 + 1.7)) + rnd() * 0.02);
+        if (i === 0) g.moveTo(x, midY - bulge); else g.lineTo(x, midY - bulge);
+      }
+      for (let i = steps; i >= 0; i--) {
+        const x = PAD + (i / steps) * s;
+        const t = i / steps;
+        const bulge = s * (0.055 + 0.045 * Math.abs(Math.sin(t * 7.1 + 4.2)) + rnd() * 0.02);
+        g.lineTo(x, midY + bulge);
+      }
+      g.closePath();
+      g.fill();
+      // A dry, pale halo where the bitumen soaked into the surrounding stone.
+      g.strokeStyle = rgba(96, 92, 86, 0.22);
+      g.lineWidth = s * 0.03;
+      g.stroke();
+      erode(g, cx, cy, s * 0.5, 10, 0.25, rnd);
+      break;
+    }
+
+    case 'patch': {
+      // A utility trench reinstatement: sawcut rectangle, 30 mm dark perimeter
+      // seam, fill about 0.68 of the surrounding albedo. The straight machine
+      // edges are the whole point — everything else on a road surface is
+      // organic, so one hard rectangle reads as human intervention.
+      const w = s * 0.9, h = s * 0.78;
+      const x0 = cx - w / 2, y0 = cy - h / 2;
+      g.fillStyle = rgba(46, 45, 44, 0.86);
+      g.fillRect(x0, y0, w, h);
+      g.strokeStyle = rgba(15, 14, 14, 0.9);
+      g.lineWidth = Math.max(2, s * 0.022);
+      g.strokeRect(x0, y0, w, h);
+      // Coarser aggregate inside the patch than outside it.
+      for (let i = 0; i < 90; i++) {
+        const px = x0 + rnd() * w, py = y0 + rnd() * h;
+        g.fillStyle = rgba(72 + rnd() * 40, 70 + rnd() * 38, 66 + rnd() * 34, 0.16 + rnd() * 0.2);
+        g.fillRect(px, py, 1 + rnd() * 4, 1 + rnd() * 3);
+      }
+      // Only the edges are eroded: a sawcut is straight, a slumped edge is not.
+      g.save();
+      g.globalCompositeOperation = 'destination-out';
+      for (let i = 0; i < 14; i++) {
+        const edge = (rnd() * 4) | 0;
+        const t = rnd();
+        const px = edge === 0 ? x0 : edge === 1 ? x0 + w : x0 + t * w;
+        const py = edge === 2 ? y0 : edge === 3 ? y0 + h : y0 + t * h;
+        blob(g, px, py, s * (0.02 + rnd() * 0.05), 0, 0, 0, 0.8);
+      }
+      g.restore();
+      break;
+    }
+
+    case 'paintLine': {
+      // Abraded thermoplastic. Fresh paint is a giveaway: real road markings in
+      // a war-damaged street are about half gone, and the road reads straight
+      // through the gaps.
+      const bandY = PAD + s * 0.32, bandH = s * 0.36;
+      g.fillStyle = rgba(184, 178, 164, 0.9);
+      g.fillRect(PAD, bandY, s, bandH);
+      // Rolled edges, slightly proud and slightly brighter.
+      g.fillStyle = rgba(206, 200, 186, 0.5);
+      g.fillRect(PAD, bandY, s, bandH * 0.12);
+      g.fillRect(PAD, bandY + bandH * 0.88, s, bandH * 0.12);
+      // Roughly 50 % coverage loss, in tyre-shaped scuffs rather than noise.
+      g.save();
+      g.globalCompositeOperation = 'destination-out';
+      for (let i = 0; i < 34; i++) {
+        const px = PAD + rnd() * s;
+        const py = bandY + rnd() * bandH;
+        blob(g, px, py, s * (0.03 + rnd() * 0.11), 0, 0, 0, 0.5 + rnd() * 0.5);
+      }
+      for (let i = 0; i < 10; i++) {
+        g.fillStyle = rgba(0, 0, 0, 0.4 + rnd() * 0.5);
+        g.fillRect(PAD + rnd() * s, bandY, s * (0.01 + rnd() * 0.05), bandH);
+      }
+      g.restore();
+      break;
+    }
+
+    case 'gritDrift': {
+      // An elongated tapered wedge of fines, for the downwind face of a prop
+      // and the seam where two ground materials meet. Painted rather than
+      // scattered because a drift seen at 15 m is a tone, not a set of stones.
+      const grd = g.createLinearGradient(PAD, 0, PAD + s, 0);
+      grd.addColorStop(0, rgba(150, 138, 116, 0.0));
+      grd.addColorStop(0.24, rgba(158, 146, 122, 0.62));
+      grd.addColorStop(0.62, rgba(150, 138, 116, 0.4));
+      grd.addColorStop(1, rgba(146, 134, 112, 0.0));
+      g.fillStyle = grd;
+      g.beginPath();
+      const st = 22;
+      for (let i = 0; i <= st; i++) {
+        const t = i / st;
+        const x = PAD + t * s;
+        const y = cy - s * 0.3 * Math.sin(Math.PI * Math.pow(t, 0.75)) * (0.7 + rnd() * 0.3);
+        if (i === 0) g.moveTo(x, cy); else g.lineTo(x, y);
+      }
+      for (let i = st; i >= 0; i--) {
+        const t = i / st;
+        const x = PAD + t * s;
+        const y = cy + s * 0.3 * Math.sin(Math.PI * Math.pow(t, 0.75)) * (0.7 + rnd() * 0.3);
+        g.lineTo(x, y);
+      }
+      g.closePath();
+      g.fill();
+      // Individual stones at the thick end, so it does not read as airbrush.
+      for (let i = 0; i < 70; i++) {
+        const t = Math.pow(rnd(), 1.6);
+        const x = PAD + (0.15 + t * 0.7) * s;
+        const y = cy + (rnd() - 0.5) * s * 0.42 * Math.sin(Math.PI * (0.15 + t * 0.7));
+        g.fillStyle = rgba(170 + rnd() * 40, 158 + rnd() * 36, 132 + rnd() * 30, 0.3 + rnd() * 0.4);
+        g.fillRect(x, y, 1 + rnd() * 3, 1 + rnd() * 2.5);
+      }
+      erode(g, cx, cy, s * 0.5, 12, 0.35, rnd);
+      break;
+    }
+
+    case 'leafDrift': {
+      // Twenty-five to forty leaves painted as one quad. A gutter run twelve
+      // metres long needs a thousand leaves and a thousand leaves is a thousand
+      // pieces of geometry the far half of the street cannot resolve anyway, so
+      // the distant runs are this and the near ones are real.
+      const n = 25 + ((rnd() * 16) | 0);
+      for (let i = 0; i < n; i++) {
+        const t = rnd();
+        const x = PAD + t * s;
+        const spread = Math.sin(Math.PI * t);
+        const y = cy + (rnd() - 0.5) * s * 0.5 * spread;
+        const r = s * (0.028 + rnd() * 0.036);
+        const a = rnd() * 6.2832;
+        // Brown-olive, the value bo6_03's leaves measure against pavers.
+        const v = 0.72 + rnd() * 0.5;
+        g.save();
+        g.translate(x, y);
+        g.rotate(a);
+        g.fillStyle = rgba(122 * v, 108 * v, 66 * v, 0.72 + rnd() * 0.25);
+        g.beginPath();
+        g.ellipse(0, 0, r, r * (0.42 + rnd() * 0.22), 0, 0, 6.2832);
+        g.fill();
+        // Midrib.
+        g.strokeStyle = rgba(70 * v, 62 * v, 40 * v, 0.5);
+        g.lineWidth = Math.max(0.8, r * 0.08);
+        g.beginPath();
+        g.moveTo(-r, 0); g.lineTo(r, 0); g.stroke();
+        g.restore();
+      }
+      break;
+    }
+
     default: break;
   }
 }
@@ -515,10 +795,82 @@ export class DecalKit {
 // --------------------------------------------------------------- placement
 
 const LIFT = 0.012;   // metres off the surface, on top of polygonOffset
+/**
+ * Contact patches sit *below* everything else, including the sheet litter they
+ * are grounding — 1.5 mm rather than 12 mm. Sharing the general lift would put
+ * the occlusion patch on top of the scrap of paper it is supposed to be under,
+ * and a blended quad drawn over a piece of litter reads as a stain on it.
+ */
+const LIFT_CONTACT = 0.0015;
 
 /** Places a decal flat on the ground, spun randomly about its own normal. */
-function onGround(bs, key, geo, x, y, z, w, h, yaw, color) {
-  bs.add(key, geo, x, y + LIFT, z, -Math.PI / 2, 0, yaw, w, h, 1, color, false);
+function onGround(bs, key, geo, x, y, z, w, h, yaw, color, lift = LIFT) {
+  bs.add(key, geo, x, y + lift, z, -Math.PI / 2, 0, yaw, w, h, 1, color, false);
+}
+
+/**
+ * How many contact patches the whole map is allowed, split so that the props
+ * cannot be starved by the ten thousand pieces of clutter that run first.
+ *
+ * These are blended, depth-write-off quads, which is the one thing in this file
+ * that can genuinely cost frames: every pixel one covers re-runs the standard
+ * shader including a three-cascade PCSS lookup. 700 patches averaging 0.4 m
+ * across is roughly 9 % of an eye-level frame at one layer. If the street shot
+ * loses more than 2 fps this is the first number to halve.
+ */
+export const CONTACT_CAP = { clutter: 420, prop: 280 };
+
+/**
+ * One occlusion patch under one thing.
+ *
+ * Returns false and costs nothing when the piece is too small to need one or
+ * the budget is spent, so callers can fire it unconditionally from inside a
+ * scatter loop. The budget lives on the kit, which is constructed once per
+ * build, so it resets correctly on a rebuild without a global.
+ *
+ * @param {number} size the piece's scaled longest horizontal axis, metres
+ * @param {number} [mult] patch size as a multiple of that
+ * @param {boolean} [force] skip the size gate (props, mounds, colliders)
+ * @param {'clutter'|'prop'} [budget]
+ */
+export function contactDecal(bs, kit, rand, x, y, z, size, mult = 2.4, force = false, budget = 'clutter') {
+  if (!bs || !kit?.texture) return false;
+  if (!force && !(size >= 0.25)) return false;
+  const used = kit._contact || (kit._contact = { clutter: 0, prop: 0 });
+  if (used[budget] >= (CONTACT_CAP[budget] || 0)) return false;
+  const geo = kit.geo('contact', rand);
+  if (!geo) return false;
+  const w = Math.max(0.12, size * mult);
+  // Slightly elliptical and randomly spun: a hundred circles read as a hundred
+  // circles however irregular each one's edge is.
+  _c.setScalar(1);
+  onGround(bs, 'gun_polymer', geo, x, y, z, w, w * (0.82 + rand() * 0.34),
+    rand() * 6.2832, _c, LIFT_CONTACT);
+  used[budget]++;
+  return true;
+}
+
+/**
+ * A dust seam along a run of kerb or material boundary. Sampled from a field
+ * the caller already built, so this is a few dozen quads and no new search.
+ */
+export function gritSeam(bs, kit, site, field, rand, n) {
+  if (!bs || !kit?.texture || !field || field.empty) return 0;
+  let count = 0;
+  const yaw = site.windYaw || 0;
+  for (let i = 0; i < n; i++) {
+    const p = field.sample(rand);
+    if (!p) break;
+    const geo = kit.geo('gritDrift', rand);
+    if (!geo) break;
+    const w = 1.1 + rand() * 1.8;
+    // Aligned with the wind, not spun at random: the whole map agrees on one
+    // direction and a seam drift is no exception.
+    onGround(bs, 'gun_polymer', geo, p.x, p.y, p.z, w, w * (0.24 + rand() * 0.16),
+      yaw + (rand() - 0.5) * 0.7, tint(rand, 0.16, 0.1));
+    count++;
+  }
+  return count;
 }
 
 /** Places a decal on a vertical face whose outward normal is (nx, nz). */
