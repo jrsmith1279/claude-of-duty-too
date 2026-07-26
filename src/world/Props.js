@@ -131,13 +131,18 @@ export class PropSystem {
     dec += hotspotDecals(ctx, site, decalSoft, decalHard, kit, rand, furniture.hotspots).count;
     dec += groundingDust(ctx, site, decalSoft, kit, rand, this._colliders).count;
 
+    // Tier order is "what to shed first", and that is decided by cost per unit
+    // of frame, not by how much geometry it is. The blended decals are one mesh
+    // and they are the single most expensive thing here, because a transparent
+    // surface writes no depth and every pixel it covers re-runs the standard
+    // shader with a three-cascade PCSS lookup. So they go last-in, first-out.
     this.tiers[0] = core.build(ctx, this.root);
     this.tiers[1] = detail.build(ctx, this.root);
-    this.tiers[2] = fine.build(ctx, this.root);
+    this.tiers[1].push(...fine.build(ctx, this.root));
     this.tiers[1].push(...decalHard.build(ctx, this.root, { overrides: kit.overrides(false) }));
-    this.tiers[1].push(...decalSoft.build(ctx, this.root, {
+    this.tiers[2] = decalSoft.build(ctx, this.root, {
       overrides: kit.overrides(true), renderOrder: 3,
-    }));
+    });
 
     this.stats.pieces = pieces;
     this.stats.decals = dec;
