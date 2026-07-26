@@ -431,6 +431,112 @@ Surf gen_stucco(vec2 uv){
 `,
   },
 
+  /**
+   * Granite setts. The feature set (map + normal + ORM + height + POM + detail
+   * + macro) is byte-identical to concrete_floor, so this key costs zero extra
+   * shader programs: SurfaceShader keys its cache on the feature signature, not
+   * on the material name.
+   */
+  paver: {
+    world: 2.4,
+    bump: 1.5,
+    cavity: 0.7,
+    glsl: /* glsl */ `
+Surf gen_paver(vec2 uv){
+  Surf s = defaultSurf();
+  float sd = uSeed + 83.0;
+
+  // --- running bond: 0.30 x 0.20 m setts, 8 across x 12 courses per 2.4 m tile
+  vec2 count = vec2(8.0, 12.0);
+  vec2 p = uv * count;
+  float row = floor(p.y);
+  float rw = mod(row, count.y);
+  // half-sett stagger plus a per-course drift, because a hand-laid road is
+  // never machine perfect and a perfect bond reads instantly as a texture
+  p.x += 0.5 * mod(row, 2.0) + (hash11(rw + sd * 3.1) - 0.5) * 0.06;
+  vec2 ci = floor(p);
+  vec2 f = p - ci;
+  vec2 cid = vec2(mod(ci.x, count.x), rw);
+  vec3 r = hash32(cid + sd);
+
+  vec2 dc = min(f, 1.0 - f);
+  float dTile = min(dc.x / count.x, dc.y / count.y);   // in tile units: 0.005 = 12 mm
+  float joint = 1.0 - smoothstep(0.0018, 0.0050, dTile);
+  float dmin = min(dc.x, dc.y);                        // in sett units, 0.5 at the centre
+
+  // --- the stone: three quarry greys plus the odd warm replacement sett
+  vec3 stone = mix(vec3(0.541, 0.502, 0.451), vec3(0.431, 0.416, 0.388), r.x);
+  stone = mix(stone, vec3(0.580, 0.537, 0.478), smoothstep(0.35, 0.95, r.y));
+  float replaced = step(0.93, fract(r.z * 7.31 + r.x * 3.7));
+  stone = mix(stone, vec3(0.541, 0.435, 0.361), replaced * 0.85);
+  stone *= mix(0.72, 1.18, fract(r.z * 41.3));
+  stone = jitterHSV(stone, hash32(cid + 19.0), 0.018, 0.22, 0.10);
+
+  // split-face granite: pointed tool marks, fine grain, glinting feldspar
+  float pick  = fbm01(uv * 260.0 + sd, vec2(260.0), 4, 2.0, 0.55);
+  float grain = fbm01(uv * 620.0 + sd * 2.0, vec2(620.0), 3, 2.0, 0.5);
+  Cell xtal = cells2(uv * 420.0 + 7.0, vec2(420.0), 1.0);
+  stone *= mix(0.86, 1.14, pick);
+  stone += (grain - 0.5) * 0.045;
+  stone = mix(stone, stone * 1.35, (1.0 - smoothstep(0.06, 0.26, xtal.f1)) * 0.25 * fract(xtal.id * 53.1));
+
+  float sh = 0.55 + (pick - 0.5) * 0.10 + (grain - 0.5) * 0.04;
+  float srough = 0.84 + (grain - 0.5) * 0.10 - (pick - 0.5) * 0.06;
+
+  // --- THE CROWN. Every sett is domed by a tenth of its depth. This is the one
+  // line that lets raking light describe individual stones rather than a grid.
+  sh += (1.0 - sq(2.0 * f.x - 1.0)) * (1.0 - sq(2.0 * f.y - 1.0)) * 0.10;
+
+  // rounded arris: the outer tenth of the face is worn off, the fresh stone
+  // under it is paler, and the last sliver holds the dirt line of the chamfer
+  float arris = 1.0 - smoothstep(0.0, 0.10, dmin);
+  sh -= arris * 0.18;
+  stone *= 1.0 + arris * 0.08;
+  stone *= 1.0 - (1.0 - smoothstep(0.0, 0.02, dmin)) * 0.28;
+
+  // wheel tracks polish the crowns and leave the joints alone
+  float lanes = smoothstep(0.40, 0.88, fbm01(warp1(uv * vec2(2.0, 5.0), vec2(2.0, 5.0), 0.5, 3) + 13.0, vec2(2.0, 5.0), 4, 2.0, 0.55));
+  float polish = lanes * smoothstep(0.25, 0.48, dmin);
+  srough = mix(srough, 0.44, polish * 0.8);
+  stone *= mix(1.0, 1.07, polish);
+
+  // corners knocked out by ploughs and kerbing
+  float chip = smoothstep(0.09, 0.0, dmin - (fbm01(f * 7.0 + cid * 5.3, vec2(7.0), 3, 2.0, 0.55) - 0.5) * 0.10)
+             * step(0.62, fract(r.y * 13.7));
+  sh -= chip * 0.10;
+  stone = mix(stone, stone * 1.18 + 0.02, chip * 0.5);
+  srough += chip * 0.07;
+
+  // --- joint: rammed grit and cement, moss along one run rather than everywhere
+  vec3 jointCol = mix(vec3(0.200, 0.188, 0.169), vec3(0.34, 0.32, 0.28), speckle(uv, 900.0, 0.5) * 0.7);
+  float jh = 0.30 - fbm01(uv * 140.0 + 31.0, vec2(140.0), 3, 2.0, 0.5) * 0.06;
+  float moss = smoothstep(0.52, 0.80, fbm01(uv * 2.5 + 61.0, vec2(2.5), 4, 2.0, 0.6)) * step(0.80, hash12(cid + 71.0));
+  jointCol = mix(jointCol, vec3(0.169, 0.227, 0.118), moss * 0.12);
+  jh += moss * 0.05;
+
+  s.alb   = mix(stone, jointCol, joint);
+  s.h     = mix(sh, jh, joint);
+  s.rough = mix(srough, 0.95, joint);
+  s.ao    = mix(0.35, 1.0, smoothstep(0.0, 0.25, dmin));
+  s.metal = 0.0;
+
+  // --- damp: rain lingers in the bedding sand under the low-lying setts
+  float damp = blobs(uv, vec2(2.5), 0.20, 0.38, 0.7, sd + 9.0);
+  s.alb *= mix(1.0, 0.74, damp);
+  s.rough = mix(s.rough, 0.55, damp);
+
+  // traffic film settling into the crevices
+  float film = sat((1.0 - s.ao) * 0.75 + turb(uv * 7.0 + 41.0, vec2(7.0), 4, 0.55) * 0.5 - 0.30);
+  applyDirt(s, film * 0.30 * uAge, vec3(0.26, 0.245, 0.225), 0.05);
+
+  applyMacro(s, uv, 0.16, 0.06, sd);
+  s.alb *= uTint;
+  s.rough = sat(s.rough + uRoughBias);
+  return s;
+}
+`,
+  },
+
   tile_roof: {
     world: 2.4,
     bump: 1.6,

@@ -70,7 +70,51 @@ await materials.init(ctx);
 materials.setWetness(WETNESS);
 materials.updateEnv(env);
 
-const keys = ONLY ? [ONLY] : MATERIAL_KEYS;
+/**
+ * `?flat=<key>` — the raw generated maps at 1:1, unlit, side by side: albedo,
+ * ORM and normal. Lit geometry is the wrong tool for judging an atlas, where
+ * what matters is tile registration and the padding at the tile borders, and
+ * both are invisible once a slab has tiled the texture 1.6 times and lit it.
+ */
+const FLAT = params.get('flat');
+if (FLAT) {
+  const set = ctx.textures?.pbr(FLAT, { repeat: [1, 1] });
+  ctx.textures?.update?.(0, ctx);
+  const maps = [set?.map, set?.roughnessMap, set?.normalMap].filter(Boolean);
+  const flatScene = new THREE.Scene();
+  const flatCam = new THREE.OrthographicCamera(-0.5, 0.5, 0.5, -0.5, 0, 10);
+  flatCam.position.z = 1;
+  const n = Math.max(maps.length, 1);
+  maps.forEach((t, i) => {
+    const m = new THREE.Mesh(
+      new THREE.PlaneGeometry(1 / n, 1 / n),
+      new THREE.MeshBasicMaterial({ map: t, toneMapped: false })
+    );
+    m.position.set((i + 0.5) / n - 0.5, 0, 0);
+    flatScene.add(m);
+  });
+  const aspect = () => innerWidth / innerHeight;
+  const fit = () => {
+    renderer.setSize(innerWidth, innerHeight, false);
+    flatCam.left = -0.5 * aspect() / n * n;
+    flatCam.right = 0.5 * aspect() / n * n;
+    flatCam.top = 0.5;
+    flatCam.bottom = -0.5;
+    flatCam.updateProjectionMatrix();
+  };
+  fit();
+  addEventListener('resize', fit);
+  renderer.setAnimationLoop(() => {
+    ctx.time += 1 / 60;
+    ctx.textures?.update?.(1 / 60, ctx);
+    renderer.render(flatScene, flatCam);
+    window.__PREVIEW_STATS__ = { calls: renderer.info.render.calls, tris: 0, programs: renderer.info.programs.length, programKeys: [] };
+  });
+  window.__PREVIEW__ = { materials, ctx, THREE };
+  window.__PREVIEW_READY__ = true;
+}
+
+const keys = FLAT ? [] : ONLY ? [ONLY] : MATERIAL_KEYS;
 const COLS = Math.min(keys.length, CLOSE ? 3 : 6);
 const STEP = 2.4;
 
@@ -151,7 +195,7 @@ keys.forEach((key, i) => {
   scene.add(l);
 });
 
-const rows = Math.ceil(keys.length / COLS);
+const rows = Math.ceil(keys.length / Math.max(COLS, 1));
 if (CLOSE) {
   camera.position.set(0, 0.6, 3.2);
   camera.lookAt(0, 0, 0);
@@ -167,7 +211,7 @@ addEventListener('resize', () => {
 });
 
 const clock = new THREE.Clock();
-renderer.setAnimationLoop(() => {
+if (!FLAT) renderer.setAnimationLoop(() => {
   const dt = clock.getDelta();
   ctx.time += dt;
   ctx.textures?.update?.(dt, ctx);
@@ -177,7 +221,7 @@ renderer.setAnimationLoop(() => {
     calls: renderer.info.render.calls,
     tris: renderer.info.render.triangles,
     programs: renderer.info.programs.length,
-    programKeys: renderer.info.programs.map((p) => p.cacheKey.slice(0, 60)),
+    programKeys: renderer.info.programs.map((p) => p.cacheKey),
   };
 });
 

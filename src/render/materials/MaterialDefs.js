@@ -35,6 +35,12 @@ export const MATERIAL_DEFS = {
     color: 0x82807a, roughness: 0.87, metalness: 0.0, env: 1.0, normalScale: 0.9,
     uv: 0.35, pom: 0.007, detail: [8, 0.5], macro: [0.028, 0.2], wet: [0.9, 0.75], grime: 0.55,
   },
+  // Granite setts. Identical feature set to concrete_floor (map + normal + ORM
+  // + height + POM + detail + macro), so it shares that key's compiled program.
+  paver: {
+    color: 0x7d766c, roughness: 0.86, metalness: 0.0, env: 1.0, normalScale: 1.05,
+    uv: 1 / 2.4, pom: 0.012, detail: [6, 0.45], macro: [0.035, 0.15], wet: [0.9, 0.85], grime: 0.55,
+  },
   brick: {
     color: 0x77463a, roughness: 0.9, metalness: 0.0, env: 1.0, normalScale: 1.1,
     uv: 0.5, pom: 0.018, detail: [8, 0.45], macro: [0.04, 0.12], wet: [0.95, 0.05], grime: 0.85,
@@ -136,10 +142,26 @@ export const MATERIAL_DEFS = {
       attenuationColor: 0xdcece4, attenuationDistance: 2.0, side: THREE.DoubleSide, depthWrite: true,
     },
   },
+  // Cloth transmits: a tarp or an awning with the sun behind it glows, it does
+  // not go black. SurfaceShader compiles the wrap/back-scatter lighting path
+  // purely on the presence of `translucency`, and until now only foliage had it,
+  // which is why every hanging canvas in street.png and combat.png reads as a
+  // silhouette cut out of black paper. Warm because canvas passes long
+  // wavelengths far better than short ones.
   fabric_canvas: {
     color: 0x7a7054, roughness: 0.95, metalness: 0.0, env: 0.95, normalScale: 1.0,
     uv: 0.8, pom: 0.0, detail: [8, 0.5], macro: [0.08, 0.1], wet: [0.9, 0.05], grime: 0.5,
-    props: { sheen: 0.45, sheenRoughness: 0.75, sheenColor: 0x8f8468 },
+    translucency: [0.55, 0.5, 0.38], alphaTest: 0.42,
+    props: { side: THREE.DoubleSide, sheen: 0.55, sheenRoughness: 0.75, sheenColor: 0x8f8468 },
+  },
+  // Cotton laundry: thinner, paler and far more transmissive than duck canvas.
+  // Shares fabric_canvas's compiled program (same feature signature, same
+  // front-side/no-alpha-test/sheen permutation) so it costs no extra program.
+  fabric_light: {
+    color: 0xbfb6a4, roughness: 0.97, metalness: 0.0, env: 0.95, normalScale: 1.0,
+    uv: 1.1, pom: 0.0, detail: [9, 0.45], macro: [0.1, 0.1], wet: [0.9, 0.05], grime: 0.35,
+    translucency: [0.78, 0.74, 0.66], alphaTest: 0.42,
+    props: { side: THREE.DoubleSide, sheen: 0.6, sheenRoughness: 0.8, sheenColor: 0xc4bcaa },
   },
   sandbag: {
     color: 0x877a5c, roughness: 0.96, metalness: 0.0, env: 0.95, normalScale: 1.2,
@@ -158,6 +180,17 @@ export const MATERIAL_DEFS = {
     color: 0x191a1c, roughness: 0.82, metalness: 0.0, env: 0.9, normalScale: 1.0,
     uv: 1.5, pom: 0.004, detail: [7, 0.45], macro: [0.3, 0.08], wet: [0.15, 0.1], grime: 0.3,
     props: { specularIntensity: 0.72 },
+  },
+  // Packed 4x4 kit atlas for operator geometry: cordura, ripstop, webbing,
+  // helmet shell, polymer, rubber, optic glass, boot lug, patches. roughness and
+  // metalness are 1.0 because the packed ORM carries the real per-surface
+  // values, which is the TextureFactory convention. The sheen term is not
+  // decoration — it is the broad cool grazing highlight that keeps a near-black
+  // operator legible against a dark background instead of a hole in the frame.
+  bot_kit: {
+    color: 0xffffff, roughness: 1.0, metalness: 1.0, env: 1.05, normalScale: 1.0,
+    uv: 1.0, pom: 0.0, detail: [10, 0.32], macro: [0, 0], wet: [0.2, 0.0], grime: 0.0,
+    props: { sheen: 0.3, sheenRoughness: 0.68, sheenColor: 0x7f8ea0, specularIntensity: 0.85 },
   },
   foliage: {
     color: 0x46672c, roughness: 0.62, metalness: 0.0, env: 1.0, normalScale: 0.8,

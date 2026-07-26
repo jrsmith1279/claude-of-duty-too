@@ -207,6 +207,342 @@ Surf gen_fabric_canvas(vec2 uv){
 `,
   },
 
+  /**
+   * Cotton laundry, sheets and light shirting. Finer and far paler than duck
+   * canvas, and carried almost entirely by the crease network — a pegged sheet
+   * without wrinkles is a card, and a card is the single most obvious tell in a
+   * street scene.
+   */
+  fabric_light: {
+    world: 0.9,
+    bump: 0.9,
+    cavity: 0.6,
+    glsl: /* glsl */ `
+Surf gen_fabric_light(vec2 uv){
+  Surf s = defaultSurf();
+  float sd = uSeed + 673.0;
+
+  // --- fine cotton plain weave, sized to still read at 3-8 m rather than to
+  // be physically correct at 40 threads/cm (which mips to grey by 2 m)
+  float N = 150.0;
+  vec2 tp = uv * N;
+  vec2 ti = floor(tp), tf = fract(tp);
+  float chk = mod(ti.x + ti.y, 2.0);
+  float warpH = pow(sin(sat(tf.x) * PI), 0.70);
+  float weftH = pow(sin(sat(tf.y) * PI), 0.70);
+  float top = mix(weftH, warpH, chk);
+  float fuzz = fbm01(uv * 1100.0 + sd, vec2(1100.0), 3, 2.0, 0.5);
+  float slub = fbm01(uv * vec2(N * 0.4, 5.0) + sd * 2.0, vec2(N * 0.4, 5.0), 3, 2.0, 0.5);
+
+  float h = 0.26 + top * 0.42 + (fuzz - 0.5) * 0.05 + (slub - 0.5) * 0.04;
+
+  // --- laundered white gone slightly warm and uneven, a faint dye lot per thread
+  vec3 base = vec3(0.800, 0.782, 0.741);
+  base = jitterHSV(base, hash32(vec2(mix(ti.y, ti.x, chk), chk) + sd), 0.008, 0.10, 0.07);
+  base *= mix(0.90, 1.06, top);
+  base *= mix(0.95, 1.05, slub);
+
+  // --- creases. Folded, pegged and never ironed: a warped ridge network plus a
+  // few long gravity folds running down from the line.
+  float creases = ridged(warp1(uv * 7.0, vec2(7.0), 0.8, 3) + 19.0, vec2(7.0), 4, 0.55);
+  float folds = ridged(vec2(uv.x * 5.0, uv.y * 1.4) + 51.0, vec2(5.0, 1.4), 3, 0.5);
+  float crease = sat(creases * 0.65 + folds * 0.55);
+  h += (crease - 0.35) * 0.22;
+  // light bends round a crease: bright on the ridge, shaded in the valley
+  base *= mix(0.86, 1.10, crease);
+  s.ao = mix(0.55, 1.0, smoothstep(0.10, 0.55, crease)) * mix(0.45, 1.0, smoothstep(0.05, 0.55, top));
+
+  // --- hemmed edge along one side with a double row of stitching
+  float hemD = abs(fract(uv.y * 2.0 + 0.25) - 0.5);
+  float hem = 1.0 - smoothstep(0.030, 0.048, hemD);
+  float stitch = (1.0 - smoothstep(0.004, 0.008, abs(hemD - 0.036))) * step(0.45, fract(uv.x * N * 0.18));
+  h += hem * 0.10 + stitch * 0.09;
+  base = mix(base, base * 0.94, hem * 0.5);
+  base = mix(base, vec3(0.62, 0.60, 0.56), stitch * 0.55);
+  s.ao *= 1.0 - hem * 0.15;
+
+  // --- age: sun bleach on the exposed face, grey water marks, the odd stain
+  float sun = smoothstep(0.35, 0.85, fbm01(uv * 3.0 + 77.0, vec2(3.0), 4, 2.0, 0.6));
+  base = mix(base, base * 0.92 + 0.09, sun * 0.5);
+  float stain = blobs(uv, vec2(4.0), 0.16, 0.30, 0.85, sd + 11.0);
+  base = mix(base, base * vec3(0.78, 0.75, 0.68), stain * 0.55 * uAge);
+
+  s.alb = base;
+  s.h = h;
+  s.rough = 0.94 + (fuzz - 0.5) * 0.08 - sat(top - 0.7) * 0.05;
+  s.metal = 0.0;
+  s.op = 1.0;
+
+  float grey = sat(1.0 - h * 1.9);
+  applyDirt(s, grey * 0.18 * uAge, vec3(0.44, 0.43, 0.40), 0.03);
+
+  applyMacro(s, uv, 0.09, 0.04, sd);
+  s.alb *= uTint;
+  s.rough = sat(s.rough + uRoughBias);
+  return s;
+}
+`,
+  },
+
+  /**
+   * Operator kit atlas. One 4x4 grid of tactical surfaces so a whole bot — plate
+   * carrier, helmet, webbing, boots, optic — draws from a single material and a
+   * single set of maps. Tile (r,c) is the UV rect [c/4, r/4]..[(c+1)/4,(r+1)/4]
+   * with r counted up from v = 0:
+   *
+   *   (0,0) 1000D cordura      (0,1) ripstop          (0,2) helmet mesh cover  (0,3) helmet shell
+   *   (1,0) rubber / leather   (1,1) hard polymer     (1,2) gun metal          (1,3) MOLLE webbing
+   *   (2,0) velcro loop        (2,1) ribbed shock cord (2,2) optic glass       (2,3) boot sole
+   *   (3,0) coyote cordura     (3,1) coyote webbing   (3,2) patch field        (3,3) grime overlay
+   *
+   * Every tile fades to its own flat mean over the outer 9.4% (12 px of a 128 px
+   * tile), so whatever bleeds across a tile edge at mip 3-4 is one flat mean
+   * meeting another and the seam never appears. Value-adjacent surfaces are
+   * neighbours for the same reason: bleed between two L*11 blacks is unmeasurable.
+   */
+  bot_kit: {
+    world: 1.0,
+    bump: 1.15,
+    cavity: 0.55,
+    glsl: /* glsl */ `
+Surf gen_bot_kit(vec2 uv){
+  Surf s = defaultSurf();
+  float sd = uSeed + 941.0;
+
+  vec2 g = uv * 4.0;
+  vec2 gi = floor(g);
+  vec2 p = g - gi;
+  float id = gi.y * 4.0 + gi.x;
+
+  vec3  alb   = vec3(0.10);
+  float rough = 0.90, metal = 0.0, h = 0.5, ao = 1.0;
+  vec3  mAlb  = vec3(0.10);
+  float mRough = 0.90, mMetal = 0.0, mH = 0.5, mAO = 0.95;
+
+  if (id < 0.5) {
+    // (0,0) 1000D cordura, 2x2 basketweave — the bulk of the plate carrier
+    float N = 56.0;
+    vec2 tp = p * N; vec2 ti = floor(tp), tf = tp - ti;
+    float chk = mod(floor(ti.x * 0.5) + floor(ti.y * 0.5), 2.0);
+    float top = mix(pow(sin(sat(tf.y) * PI), 0.5), pow(sin(sat(tf.x) * PI), 0.5), chk);
+    float fuzz = fbm01(p * 620.0 + sd, vec2(620.0), 3, 2.0, 0.5);
+    h = 0.44 + top * 0.35 + (fuzz - 0.5) * 0.05;
+    alb = vec3(0.101, 0.108, 0.098) * mix(0.68, 1.32, top) * mix(0.92, 1.08, fuzz);
+    rough = 0.90 + (fuzz - 0.5) * 0.05;
+    ao = mix(0.40, 1.0, smoothstep(0.05, 0.60, top));
+    mAlb = vec3(0.118, 0.127, 0.115); mRough = 0.90; mH = 0.710; mAO = 0.93;
+  } else if (id < 1.5) {
+    // (0,1) ripstop: a plain weave with a heavier thread every 8th, plus a
+    // dark seam stitch across it
+    float N = 44.0;
+    vec2 tp = p * N; vec2 ti = floor(tp), tf = tp - ti;
+    float chk = mod(ti.x + ti.y, 2.0);
+    float top = mix(pow(sin(sat(tf.y) * PI), 0.65), pow(sin(sat(tf.x) * PI), 0.65), chk);
+    float rip = max(step(7.5, mod(ti.x, 8.0)), step(7.5, mod(ti.y, 8.0)));
+    float fuzz = fbm01(p * 700.0 + sd * 2.0, vec2(700.0), 3, 2.0, 0.5);
+    h = 0.46 + top * 0.22 + rip * 0.14 + (fuzz - 0.5) * 0.04;
+    alb = vec3(0.088, 0.094, 0.090) * mix(0.72, 1.26, top) * mix(1.0, 1.12, rip);
+    rough = 0.90 + (fuzz - 0.5) * 0.05;
+    ao = mix(0.48, 1.0, smoothstep(0.05, 0.55, top));
+    // 6 mm bar stitch every 40 mm
+    float st = (1.0 - smoothstep(0.006, 0.012, abs(fract(p.y * 6.0) - 0.5) / 6.0)) * step(0.4, fract(p.x * 44.0));
+    h += st * 0.10; alb = mix(alb, vec3(0.055, 0.058, 0.056), st * 0.6);
+    mAlb = vec3(0.099, 0.106, 0.101); mRough = 0.90; mH = 0.637; mAO = 0.95;
+  } else if (id < 2.5) {
+    // (0,2) helmet mesh cover: a hex net lying over a smooth shell
+    float N = 32.0;
+    vec2 hp = vec2(p.x * N, p.y * N * 1.1547);
+    hp.x += mod(floor(hp.y), 2.0) * 0.5;
+    vec2 hf = fract(hp) - 0.5;
+    float hex = max(abs(hf.x) * 0.866 + abs(hf.y) * 0.5, abs(hf.y));
+    float cord = 1.0 - smoothstep(0.30, 0.46, hex);
+    float fuzz = fbm01(p * 540.0 + sd, vec2(540.0), 3, 2.0, 0.5);
+    h = 0.52 + cord * 0.28 + (fuzz - 0.5) * 0.03;
+    alb = mix(vec3(0.058, 0.062, 0.058), vec3(0.112, 0.118, 0.104), cord) * mix(0.94, 1.08, fuzz);
+    rough = mix(0.46, 0.92, cord);
+    ao = mix(0.55, 1.0, cord);
+    mAlb = vec3(0.077, 0.082, 0.074); mRough = 0.62; mH = 0.618; mAO = 0.71;
+  } else if (id < 3.5) {
+    // (0,3) bare helmet shell: aramid laminate, worley scuffs down to matte
+    float weave = fbm01(p * 190.0 + sd, vec2(190.0), 3, 2.0, 0.5);
+    Cell sc = cells2(p * 13.0 + 3.0, vec2(13.0), 1.0);
+    float scuff = (1.0 - smoothstep(0.10, 0.34, sc.f1)) * step(0.92, fract(sc.id * 27.7));
+    h = 0.62 + (weave - 0.5) * 0.04 - scuff * 0.03;
+    alb = vec3(0.072, 0.076, 0.070) * mix(0.94, 1.08, weave);
+    alb = mix(alb, alb * 1.35, scuff * 0.6);
+    rough = mix(0.44, 0.60, scuff);
+    ao = 1.0 - scuff * 0.10;
+    mAlb = vec3(0.074, 0.078, 0.072); mRough = 0.45; mH = 0.620; mAO = 0.99;
+  } else if (id < 4.5) {
+    // (1,0) rubber / leather: worley pebble grain
+    Cell pb = cells2(p * 90.0 + sd, vec2(90.0), 1.0);
+    float peb = 1.0 - smoothstep(0.06, 0.36, pb.f1);
+    float micro = fbm01(p * 480.0 + 7.0, vec2(480.0), 3, 2.0, 0.5);
+    h = 0.50 + peb * 0.32 + (micro - 0.5) * 0.05;
+    alb = vec3(0.052, 0.050, 0.050) * mix(0.72, 1.40, sat(peb * 0.7 + micro * 0.5));
+    rough = 0.50 + (micro - 0.5) * 0.10 - peb * 0.05;
+    ao = mix(0.62, 1.0, smoothstep(0.0, 0.5, peb));
+    mAlb = vec3(0.055, 0.053, 0.053); mRough = 0.48; mH = 0.612; mAO = 0.85;
+  } else if (id < 5.5) {
+    // (1,1) hard polymer: buckles, clips, mag bodies
+    float stip = fbm01(p * 620.0 + sd, vec2(620.0), 3, 2.0, 0.5);
+    float flow = fbm01(warp1(p * 7.0, vec2(7.0), 0.6, 3) + 23.0, vec2(7.0), 4, 2.0, 0.55);
+    h = 0.60 + (stip - 0.5) * 0.15 + (flow - 0.5) * 0.04;
+    alb = vec3(0.046, 0.047, 0.050) * mix(0.80, 1.30, sat(stip * 0.6 + flow * 0.5));
+    rough = 0.36 + (stip - 0.5) * 0.08;
+    ao = 1.0;
+    mAlb = vec3(0.050, 0.051, 0.054); mRough = 0.36; mH = 0.600; mAO = 1.00;
+  } else if (id < 6.5) {
+    // (1,2) gun metal: parkerised, machining lines running along +U. The only
+    // metallic surface in the atlas.
+    float lines = fbm01(vec2(p.x * 8.0, p.y * 900.0) + sd, vec2(8.0, 900.0), 3, 2.0, 0.5);
+    float broad = fbm01(p * 40.0 + 11.0, vec2(40.0), 3, 2.0, 0.5);
+    h = 0.58 + (lines - 0.5) * 0.06 + (broad - 0.5) * 0.03;
+    alb = vec3(0.170, 0.176, 0.186) * mix(0.82, 1.20, lines) * mix(0.94, 1.06, broad);
+    rough = 0.24 + (lines - 0.5) * 0.10;
+    metal = 1.0;
+    ao = 1.0;
+    mAlb = vec3(0.172, 0.178, 0.188); mRough = 0.24; mMetal = 1.0; mH = 0.580; mAO = 1.00;
+  } else if (id < 7.5) {
+    // (1,3) MOLLE webbing. A HORIZONTAL ladder: a 25 mm band every 38 mm with a
+    // bar-tack every 38 mm across it. At 20-30 m this is the single texture that
+    // says 'soldier' rather than 'dark mannequin', so it is authored to survive
+    // mipping rather than to be physically fine.
+    float rows = 9.0;
+    float ry = p.y * rows;
+    float band = smoothstep(0.02, 0.09, fract(ry)) * smoothstep(0.68, 0.60, fract(ry));
+    float tape = fbm01(vec2(p.x * 260.0, ry * 26.0) + sd, vec2(260.0, 26.0), 3, 2.0, 0.5);
+    float tack = band * step(0.72, fract(p.x * 9.0)) * smoothstep(0.10, 0.20, fract(ry));
+    h = 0.40 + band * 0.34 + tack * 0.12 + (tape - 0.5) * 0.05;
+    alb = vec3(0.092, 0.098, 0.090) * mix(0.66, 1.28, band) * mix(0.92, 1.10, tape);
+    alb = mix(alb, vec3(0.048, 0.052, 0.048), tack * 0.55);
+    rough = 0.92 + (tape - 0.5) * 0.04;
+    ao = mix(0.34, 1.0, smoothstep(0.0, 0.35, band));
+    mAlb = vec3(0.091, 0.097, 0.089); mRough = 0.92; mH = 0.594; mAO = 0.74;
+  } else if (id < 8.5) {
+    // (2,0) velcro loop field: matted fuzz, no structure, very rough
+    float f1 = fbm01(p * 340.0 + sd, vec2(340.0), 4, 2.0, 0.5);
+    float f2 = fbm01(p * 900.0 + 31.0, vec2(900.0), 3, 2.0, 0.5);
+    h = 0.54 + (f1 - 0.5) * 0.16 + (f2 - 0.5) * 0.08;
+    alb = vec3(0.064, 0.067, 0.063) * mix(0.80, 1.24, sat(f1 * 0.6 + f2 * 0.5));
+    rough = 0.95;
+    ao = mix(0.62, 1.0, f1);
+    mAlb = vec3(0.067, 0.070, 0.066); mRough = 0.95; mH = 0.540; mAO = 0.81;
+  } else if (id < 9.5) {
+    // (2,1) ribbed shock cord and elastic keepers
+    float ribs = sin(p.y * 3.0 * 26.0 * TAU) * 0.5 + 0.5;
+    ribs = pow(ribs, 1.4);
+    float braid = fbm01(vec2(p.x * 90.0, p.y * 300.0) + sd, vec2(90.0, 300.0), 3, 2.0, 0.5);
+    h = 0.46 + ribs * 0.30 + (braid - 0.5) * 0.06;
+    alb = vec3(0.058, 0.060, 0.058) * mix(0.72, 1.30, ribs) * mix(0.94, 1.08, braid);
+    rough = 0.86 - ribs * 0.08;
+    ao = mix(0.50, 1.0, ribs);
+    mAlb = vec3(0.056, 0.058, 0.056); mRough = 0.83; mH = 0.589; mAO = 0.72;
+  } else if (id < 10.5) {
+    // (2,2) optic glass: flat, near-mirror, 15% AR coat tint toward #2a3a30
+    float dustf = fbm01(p * 260.0 + sd, vec2(260.0), 3, 2.0, 0.5);
+    h = 0.70 + (dustf - 0.5) * 0.01;
+    alb = mix(vec3(0.028, 0.030, 0.030), vec3(0.165, 0.227, 0.188), 0.15);
+    alb *= mix(0.96, 1.06, dustf);
+    rough = 0.10 + dustf * 0.04;
+    ao = 1.0;
+    mAlb = alb; mRough = 0.12; mH = 0.700; mAO = 1.00;
+  } else if (id < 11.5) {
+    // (2,3) boot sole: 20 mm lugs
+    float N = 12.0;
+    vec2 lp = p * vec2(N, N);
+    lp.y += mod(floor(lp.x), 2.0) * 0.5;
+    vec2 lf = fract(lp) - 0.5;
+    float lug = sat(1.0 - (abs(lf.x) + abs(lf.y)) * 2.3);
+    lug = smoothstep(0.05, 0.35, lug);
+    float grit = fbm01(p * 420.0 + sd, vec2(420.0), 3, 2.0, 0.5);
+    h = 0.34 + lug * 0.60 + (grit - 0.5) * 0.05;
+    alb = vec3(0.040, 0.039, 0.038) * mix(0.70, 1.35, lug) * mix(0.92, 1.10, grit);
+    rough = 0.62 - lug * 0.10;
+    ao = mix(0.28, 1.0, lug);
+    mAlb = vec3(0.036, 0.035, 0.034); mRough = 0.59; mH = 0.520; mAO = 0.50;
+  } else if (id < 12.5) {
+    // (3,0) coyote cordura #6b5a3c — pouches and slings against the black kit
+    float N = 56.0;
+    vec2 tp = p * N; vec2 ti = floor(tp), tf = tp - ti;
+    float chk = mod(floor(ti.x * 0.5) + floor(ti.y * 0.5), 2.0);
+    float top = mix(pow(sin(sat(tf.y) * PI), 0.5), pow(sin(sat(tf.x) * PI), 0.5), chk);
+    float fuzz = fbm01(p * 620.0 + sd * 3.0, vec2(620.0), 3, 2.0, 0.5);
+    h = 0.44 + top * 0.33 + (fuzz - 0.5) * 0.05;
+    alb = vec3(0.420, 0.353, 0.235) * mix(0.70, 1.24, top) * mix(0.93, 1.07, fuzz);
+    rough = 0.90 + (fuzz - 0.5) * 0.05;
+    ao = mix(0.42, 1.0, smoothstep(0.05, 0.60, top));
+    mAlb = vec3(0.469, 0.394, 0.262); mRough = 0.90; mH = 0.694; mAO = 0.93;
+  } else if (id < 13.5) {
+    // (3,1) coyote webbing #5e4f35, same ladder pitch as the black MOLLE
+    float rows = 9.0;
+    float ry = p.y * rows;
+    float band = smoothstep(0.02, 0.09, fract(ry)) * smoothstep(0.68, 0.60, fract(ry));
+    float tape = fbm01(vec2(p.x * 260.0, ry * 26.0) + sd, vec2(260.0, 26.0), 3, 2.0, 0.5);
+    float tack = band * step(0.72, fract(p.x * 9.0)) * smoothstep(0.10, 0.20, fract(ry));
+    h = 0.40 + band * 0.34 + tack * 0.12 + (tape - 0.5) * 0.05;
+    alb = vec3(0.369, 0.310, 0.208) * mix(0.66, 1.26, band) * mix(0.93, 1.09, tape);
+    alb = mix(alb, alb * 0.62, tack * 0.55);
+    rough = 0.92 + (tape - 0.5) * 0.04;
+    ao = mix(0.34, 1.0, smoothstep(0.0, 0.35, band));
+    mAlb = vec3(0.351, 0.295, 0.198); mRough = 0.92; mH = 0.594; mAO = 0.74;
+  } else if (id < 14.5) {
+    // (3,2) patch field: a subdued flag, a name tape and a 12 mm IR glint square
+    float stripe = floor(p.y * 6.0);
+    vec3 flagA = vec3(0.130, 0.132, 0.140);
+    vec3 flagB = vec3(0.072, 0.074, 0.080);
+    vec3 col = mix(flagA, flagB, mod(stripe, 2.0));
+    // canton
+    float canton = step(p.x, 0.42) * step(0.62, p.y);
+    col = mix(col, vec3(0.052, 0.056, 0.068), canton);
+    // IR glint square, 12 mm on a 250 mm tile
+    float ir = step(0.70, p.x) * step(p.x, 0.748) * step(0.10, p.y) * step(p.y, 0.148);
+    col = mix(col, vec3(0.215, 0.222, 0.212), ir);
+    float twill = fbm01(p * 420.0 + sd, vec2(420.0), 3, 2.0, 0.5);
+    float border = (1.0 - smoothstep(0.02, 0.05, min(min(p.x, 1.0 - p.x), min(p.y, 1.0 - p.y))));
+    col = mix(col, vec3(0.058, 0.060, 0.058), border * 0.8);
+    alb = col * mix(0.90, 1.10, twill);
+    h = 0.56 + border * 0.10 + ir * 0.03 + (twill - 0.5) * 0.05;
+    rough = mix(0.88, 0.34, ir);
+    ao = 1.0 - border * 0.15;
+    mAlb = vec3(0.095, 0.097, 0.103); mRough = 0.86; mH = 0.580; mAO = 0.94;
+  } else {
+    // (3,3) grime overlay: dust, salt bloom and blood-brown, for the bot shader
+    // to multiply over anything that needs to look used
+    float dust = fbm01(warp1(p * 6.0, vec2(6.0), 0.8, 3) + sd, vec2(6.0), 5, 2.0, 0.55);
+    float fine = fbm01(p * 220.0 + 13.0, vec2(220.0), 3, 2.0, 0.5);
+    float spat = blobs(p, vec2(7.0), 0.14, 0.26, 0.7, sd + 5.0);
+    alb = mix(vec3(0.148, 0.140, 0.124), vec3(0.300, 0.284, 0.250), dust);
+    alb = mix(alb, vec3(0.118, 0.058, 0.046), spat * 0.65);
+    alb *= mix(0.92, 1.08, fine);
+    h = 0.50 + (dust - 0.5) * 0.10 + (fine - 0.5) * 0.05;
+    rough = 0.94 - spat * 0.20;
+    ao = mix(0.80, 1.0, dust);
+    mAlb = vec3(0.224, 0.212, 0.187); mRough = 0.93; mH = 0.500; mAO = 0.90;
+  }
+
+  // --- 12 px of a 128 px tile ramped to the tile mean, on every side
+  const float B = 0.09375;
+  vec2 de = min(p, 1.0 - p);
+  float edge = 1.0 - smoothstep(0.0, B, min(de.x, de.y));
+  edge = edge * edge * (3.0 - 2.0 * edge);
+
+  s.alb   = mix(alb, mAlb, edge);
+  s.rough = mix(rough, mRough, edge);
+  s.metal = mix(metal, mMetal, edge);
+  s.h     = mix(h, mH, edge);
+  s.ao    = mix(ao, mAO, edge);
+  s.op    = 1.0;
+
+  // No applyMacro: a metres-scale drift would smear straight across tile
+  // boundaries and undo the whole point of the padding.
+  s.alb *= uTint;
+  s.rough = sat(s.rough + uRoughBias);
+  return s;
+}
+`,
+  },
+
   sandbag: {
     world: 0.7,
     bump: 1.4,
