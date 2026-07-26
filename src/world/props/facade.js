@@ -648,13 +648,19 @@ function railing(bs, detail, g, fr, f, s, y, w, out, kit, rand, midX, midZ, winS
     n++;
   }
   n += 2;
-  // Balusters into the shed-first tier: they are the one part of this that a
-  // weak machine can lose without the balcony disappearing.
+  // DEVIATION from the brief, on a measurement. The brief puts the balusters
+  // in the shed-first `detail` tier so setDensity loses them first. That is a
+  // good idea and it costs one draw call: `detail` has no metal_rusted bucket
+  // otherwise, and the brief's own budget line for this item is "+2 (winSet,
+  // winLit)". Core already has a non-casting metal_rusted bucket, so here they
+  // are free. What is given up is 23 k triangles of shed, against a 3.5 M
+  // budget and a frame that is fill-bound rather than submission-bound.
   const count = Math.max(2, Math.round(w / 0.115));
   for (let i = 0; i <= count; i++) {
-    place(detail, 'metal_rusted', g.baluster, fr, f, s - w * 0.5 + (i / count) * w, y + 0.53, out, _c2, false);
+    place(bs, 'metal_rusted', g.baluster, fr, f, s - w * 0.5 + (i / count) * w, y + 0.53, out, _c2, false);
     n++;
   }
+  void detail;
   return n;
 }
 
