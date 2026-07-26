@@ -1,29 +1,34 @@
 # HANDOFF — Claude of Duty
 
-**Paused:** 2026-07-25, after Wave 1, its integration pass, and the resumed visual pass.
+**Paused:** 2026-07-25 (late). Wave 2 content landed; Wave 2 integration was
+interrupted partway and the blind critic run never started.
 **Repo:** `/Users/jacksmith/Documents/github/jack/claude-of-duty` (git, no remote)
-**Last good commit:** `062cf70` — *shoot: reframe establishing and goldenhour presets*
-**Current look:** `docs/state-at-pause.png`
+**Last good commit:** see `git log -1` — tree is clean, build passes, harness runs clean.
+**Current look:** `docs/state-at-pause.png` (goldenhour) and
+`docs/state-at-pause-sheet.png` (all 10 presets).
+
+> **READ THIS FIRST, THEN `## WHERE TO PICK UP` AT THE BOTTOM.**
+> Everything between is history and reference.
 
 ---
 
 ## 30-second summary
 
-The engine and the whole rendering pipeline are **built, integrated and working**.
-~17,700 lines across 82 files. The harness renders 10 fixed camera presets headless
-on a real GPU with **zero console errors at 60 fps** (1600×900, 178–193 draws).
+**128 files, ~36,900 lines, 67 commits.** The game now renders a dense, populated
+combat street: weapon viewmodels with working red-dot optics, ground clutter and
+debris, market stalls, burnt-out vehicles, oil drums, overhead power cables and
+laundry lines, graffiti and decals, AI bots, and a staged combat tableau with
+tracers and muzzle flash.
 
-The frames show a real street with a blue cloud-scattered sky, a hard sun raking
-across the road so the street floor splits half in light and half in shadow, warm
-cream facades against blue-shadowed ones, and three readable depth planes. `night`
-and `goldenhour` are genuinely good; `goldenhour` is the strongest frame in the set.
+Harness: **zero console errors, all 10 presets render.**
 
-It is still a **blockout** — no props, clutter, decals, weapons, AI or HUD — but it
-is a contract-complete blockout that exercises every integration path.
+**But it is now over budget on both axes** — 358 draw calls against a 350 limit,
+and 36–49 fps against a 60 target. That is the top priority on resume, and it is
+the direct cause of the interruption happening before the critic run.
 
-Wave 2 (content) has not started. **No visual critic loop has run yet** — nothing
-has been through a blind A/B against a real Call of Duty frame. That harness is
-built and self-tested but has never been pointed at a finished shot.
+Wave 2 integration got roughly 80% through. **The blind A/B critic against real
+Call of Duty frames has still never run** — that harness is built and self-tested
+but has never judged a finished shot.
 
 ---
 
@@ -473,3 +478,99 @@ silhouette layer.
 materially, re-verify all 10 presets still frame something worth judging. Three
 separate agents have now each independently reviewed a shot that was pointed at a
 wall and reported on the wall.
+
+---
+
+# WHERE TO PICK UP
+
+*(This section is the resume point. Written 2026-07-25 late, after Wave 2 content
+landed and integration was interrupted for usage limits.)*
+
+## Current measured state
+
+```
+node tools/shoot.mjs --port 5361 --out shots/wave2 --w 1600 --h 900
+```
+`errors: []`, all 10 presets render. Per-shot (the harness now reports per-shot
+rather than one misleading aggregate — that was a real bug in the tooling):
+
+| preset | fps | draws | tris |
+|---|---|---|---|
+| establishing | 41 | 305 | 1.03 M |
+| street | 40 | 317 | 1.03 M |
+| interior | 42 | 305 | 1.03 M |
+| weapon | 38 | 346 | 1.05 M |
+| ads | 36 | 332 | 1.05 M |
+| materials | 49 | 213 | 0.94 M |
+| goldenhour | 39 | 315 | 1.03 M |
+| night | 38 | 328 | 1.03 M |
+| skyline | 41 | 304 | 1.02 M |
+| combat | **41** | **358** | **1.10 M** |
+
+`withinBudget: false` — 358 draws > 350 budget, 36 fps < 60 target.
+
+## Do these in order
+
+### 1. PERFORMANCE — blocking everything else
+Triangles went 2.2 k → 1.1 M and draws 178 → 358 in one wave. fps roughly halved.
+Before adding a single further feature, get back inside 350 draws / 60 fps.
+Leads, cheapest first:
+- `ctx.props.setDensity()` exists — find the knee where the frames still read dense.
+- Instancing coverage: 6 k merged clutter pieces across 11 silhouettes is good, but
+  check stalls, drums, barriers and cables are batched too.
+- LODs and distance culling on props; bots already cull shadows past 34 m.
+- Programs hit 59 against a 60 budget — nearly out of shader slots. Audit for
+  material overrides that are forking programs unnecessarily.
+- Profile before optimising. It may be fill/post cost, not geometry.
+
+### 2. FINISH WAVE 2 INTEGRATION
+It got ~80% through. Remaining, from its own task list:
+- Re-aim the 10 camera presets now that props, weapons and bots exist. Several
+  frame badly. **Preset hygiene rule: three separate agents have each reviewed a
+  shot pointed at a wall and dutifully reported on the wall.**
+- Read every PNG and fix cheap visual wins.
+- Confirm all `window.__COD__` hooks merge rather than replace (one double-wrap of
+  the `stageCombat` chain was already found and fixed — check for others).
+
+### 3. RUN THE BLIND CRITIC — never yet done
+This is the whole point of the project and it has never executed once.
+```
+node tools/blind.mjs --a shots/wave2/street.png --b refs/bo6_05.jpg --out blind/street --label "ground-level street"
+```
+Then have a critic agent read `blind/street.png` **only** — never
+`blind/street.key.json` until after it has committed to a verdict — and score
+against `docs/CRITIC_RUBRIC.md`.
+Matched pairs from `refs/catalog.json`:
+`street`→`bo6_05`, `establishing`→`mw3_04`, `goldenhour`→`mw3_07`, `night`→`bo6_06`.
+`interior` and `materials` have no clean full-frame reference — use `--bcrop` to pull
+an environment-only region out of `bo6_03` or `mw3_08`.
+
+Pass condition: TOTAL ≥ 78/100, zero automatic failures, blind confidence ≤ 65.
+
+### 4. THEN loop: critic → fix → re-render, per preset, until pass.
+
+## My own read of the frames (looked at, not inferred)
+
+Good: `goldenhour` is the strongest frame in the project — warm raking light, real
+clutter, believable depth. `night` reads well. The viewmodel and red-dot optic in
+`ads` and `weapon` are convincing. Overhead cables and laundry lines fixed the empty
+upper frame. The `combat` tableau has bots, tracers and smoke reading as a real moment.
+
+Still not AAA, honestly:
+- **Facades are still flat boxes with no windows or doors.** At distance the buildings
+  read as untextured slabs. This is the single biggest remaining visual gap and it is
+  a Level.js job, not a props job.
+- The far end of the street still blows to white in several daytime presets.
+- `establishing` has an odd hard horizon band where the ground plane ends.
+- Ground clutter is well distributed but reads slightly "sprinkled" — uniform density
+  rather than accumulating in drifts against obstacles.
+
+## Process notes that earned their place
+
+- **Commit after every unit of work.** Auth expiry has now killed a run three times.
+  Each time, the incrementally-committed work survived and only the report was lost.
+  The 49 commits from the Wave 2 content run are entirely due to this rule.
+- The parallel-agent pattern keeps working: 5 agents, 49 commits, zero merge
+  conflicts. `docs/ARCHITECTURE.md` disjoint file ownership is what makes it safe.
+- Agents given `tools/` as out-of-scope will correctly report a broken preset and
+  correctly refuse to fix it. Give the integrator `tools/` access explicitly.
