@@ -28,14 +28,18 @@ float sample4( vec2 uv ) {
 
 void main() {
   float l = sample4( vUv );
-  // Centre weighting plus a sky rejection from the depth buffer: a camera
-  // pointed at a bright horizon should still expose for the street, which is
-  // what a meter with a spot pattern does.
+  // Broad centre weighting plus a sky rejection from the depth buffer. The
+  // pattern is deliberately wide rather than spot: on a street lit half in hard
+  // sun and half in deep shadow, a tight spot meter keys to whichever half
+  // happens to sit under the reticle and blows out the other one.
   vec2 d = vUv - 0.5;
-  float w = exp( -dot( d, d ) * 2.0 );
+  float w = exp( -dot( d, d ) * 1.15 );
   float sky = step( 0.9999, texture( uDepth, vUv ).r );
   w *= mix( 1.0, uSkyWeight, sky );
-  fragColor = vec4( log( max( l, 1e-5 ) ) * w, w, 0.0, 1.0 );
+  // First and second weighted moments of log luminance. The second moment is
+  // what lets the adapt step key off a high percentile instead of the mean.
+  float lg = log( max( l, 1e-5 ) );
+  fragColor = vec4( lg * w, w, lg * lg * w, 1.0 );
 }
 `;
 
@@ -44,14 +48,14 @@ uniform sampler2D uSrc;
 uniform vec2 uTexel;
 
 void main() {
-  vec2 acc = vec2( 0.0 );
+  vec3 acc = vec3( 0.0 );
   for ( int y = 0; y < 4; y++ ) {
     for ( int x = 0; x < 4; x++ ) {
       vec2 o = ( vec2( float( x ), float( y ) ) - 1.5 ) * uTexel;
-      acc += texture( uSrc, vUv + o ).rg;
+      acc += texture( uSrc, vUv + o ).rgb;
     }
   }
-  fragColor = vec4( acc / 16.0, 0.0, 1.0 );
+  fragColor = vec4( acc / 16.0, 1.0 );
 }
 `;
 
@@ -62,10 +66,21 @@ uniform float uRate;
 uniform float uReset;
 uniform float uMinLum;
 uniform float uMaxLum;
+uniform float uHighlightBias;
+uniform float uSigmaMax;
 
 void main() {
-  vec2 s = texture( uCurrent, vec2( 0.5 ) ).rg;
-  float target = clamp( exp( s.r / max( s.g, 1e-4 ) ), uMinLum, uMaxLum );
+  vec3 s = texture( uCurrent, vec2( 0.5 ) ).rgb;
+  float wsum = max( s.g, 1e-4 );
+  float mean = s.r / wsum;
+  // Log luminance is close enough to normal that mean + k.sigma is a percentile:
+  // k = 0.85 lands near the 80th. Keying off that instead of the plain log
+  // average is what stops a half-sun / half-shadow street from metering to the
+  // shadow and clipping every sunlit concrete face to flat white. sigma is
+  // capped so a night frame with a few sodium lamps in an otherwise black
+  // street does not meter itself into the ground.
+  float sigma = sqrt( max( s.b / wsum - mean * mean, 0.0 ) );
+  float target = clamp( exp( mean + uHighlightBias * min( sigma, uSigmaMax ) ), uMinLum, uMaxLum );
   float prev = texture( uPrev, vec2( 0.5 ) ).r;
   if ( uReset > 0.5 || prev <= 0.0 ) { fragColor = vec4( target, 0.0, 0.0, 1.0 ); return; }
   // Track in log space and snap on a large jump so a time-of-day change does
@@ -97,13 +112,23 @@ export class ExposurePass {
       uReset: { value: 1 },
       uMinLum: { value: 0.0025 },
       uMaxLum: { value: 12 },
+      uHighlightBias: { value: 0.62 },
+      uSigmaMax: { value: 1.75 },
     });
 
+    // Full float: the variance is a difference of two similar second moments,
+    // and half float loses it in the noise once log-luminance squared runs to
+    // three figures. These targets are 64x64 at most, so it costs nothing.
     this.chain = [];
     for (const s of [64, 16, 4, 1]) {
-      this.chain.push(makeRT(s, s, { name: `lum${s}`, minFilter: THREE.LinearFilter }));
+      this.chain.push(makeRT(s, s, {
+        name: `lum${s}`, type: THREE.FloatType, minFilter: THREE.LinearFilter,
+      }));
     }
-    this.adapted = [makeRT(1, 1, { name: 'adapt0' }), makeRT(1, 1, { name: 'adapt1' })];
+    this.adapted = [
+      makeRT(1, 1, { name: 'adapt0', type: THREE.FloatType }),
+      makeRT(1, 1, { name: 'adapt1', type: THREE.FloatType }),
+    ];
     this.write = 0;
     this.needsReset = true;
   }
