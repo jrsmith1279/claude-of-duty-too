@@ -32,7 +32,7 @@ const MASK_WORLD = 1 | 2;
  * backgrounds, always 25-42 points DARKER, and the old bots were on average
  * 25 L* too bright.
  */
-const KIT_EXPOSURE = 0.62;
+const KIT_EXPOSURE = 0.72;
 
 // Contact shadow: quad footprint in metres, and the distance it fades out over.
 const CONTACT_W = 0.62;
