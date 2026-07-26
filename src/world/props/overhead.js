@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {
   chamferBox, pipeGeo, corrugatedGeo, clothGeo, cableGeo, lumpGeo, projectUV, jitterColor,
-  twoSided, layFlat,
+  layFlat, shellGeo, SHELL_T,
 } from './lib.js';
 
 /**
@@ -26,6 +26,7 @@ import {
  */
 
 const _c = new THREE.Color();
+const _hsl = new THREE.Color();
 const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
 const _o = new THREE.Vector3();
@@ -40,7 +41,10 @@ function geo() {
     barAlong: pipeGeo(0.03, 1, 6, false).rotateZ(Math.PI / 2),
     barOut: pipeGeo(0.028, 1, 6, false).rotateX(Math.PI / 2),
     post: pipeGeo(0.04, 1, 6, false),
-    sheet: twoSided(layFlat(corrugatedGeo(1, 1, 12, 0.016))),
+    // Folded steel has a real 2-3 mm bend radius at its cut edge, never zero.
+    // `shellGeo` is `twoSided` plus that edge, for four extra triangles a rim
+    // segment, and it is the difference between a sheet and a cut-out.
+    sheet: shellGeo(layFlat(corrugatedGeo(1, 1, 12, 0.016)), 0.006),
     canvas: null,        // built per-instance: the sag has to match the span
     tank: pipeGeo(0.62, 1.35, 12, true, 0.05),
     tankLid: pipeGeo(0.3, 0.1, 10, true, 0.02),
@@ -53,7 +57,7 @@ function geo() {
     parapet: chamferBox(1, 0.55, 0.26, 0.035),
     coping: chamferBox(1, 0.07, 0.34, 0.02),
     crate: chamferBox(0.62, 0.5, 0.44, 0.022),
-    shackWall: twoSided(corrugatedGeo(1, 1, 10, 0.02)),
+    shackWall: shellGeo(corrugatedGeo(1, 1, 10, 0.02), 0.006),
     step: chamferBox(1.05, 0.05, 0.28, 0.008),
     rail: pipeGeo(0.022, 1, 5, false).rotateZ(Math.PI / 2),
     railPost: pipeGeo(0.02, 1, 5, false),
@@ -69,6 +73,67 @@ function geo() {
     lump: lumpGeo(0.5, 0.4, [1, 0.5, 1], 1, 3),
   };
   return G;
+}
+
+// ------------------------------------------------------------------- colour
+
+/**
+ * Turns a wanted *absolute* colour into the vertex tint that produces it on a
+ * given material.
+ *
+ * A merged batch has one material per bucket, so the only per-piece colour
+ * channel is the vertex attribute, and that attribute is a multiplier over the
+ * material's own albedo. Every existing caller works around this by nudging a
+ * jitter up or down, which is fine for beige-on-beige but cannot reach a red
+ * shirt through a warm-grey canvas: the multiplier needed is 0.86 red against
+ * 0.19 green, and `jitterColor` only walks a warm/cool axis by design.
+ *
+ * So: author the colour you actually want, divide out the base, clamp. The
+ * clamp matters — the surface shader also folds vertex colour into the
+ * indirect term, and a multiplier much over 1.25 stops reading as pigment and
+ * starts reading as an emissive.
+ */
+function tintFor(out, wanted, base) {
+  const cl = (v) => (v < 0.05 ? 0.05 : v > 1.25 ? 1.25 : v);
+  out.setRGB(cl(wanted.r / base.r), cl(wanted.g / base.g), cl(wanted.b / base.b));
+  return out;
+}
+
+/** Material base albedos, mirrored from `MaterialDefs` so `tintFor` can divide. */
+const BASE_LIGHT = new THREE.Color(0xbfb6a4);   // fabric_light
+const BASE_CANVAS = new THREE.Color(0x7a7054);  // fabric_canvas
+
+/**
+ * Washing-line palette.
+ *
+ * A street of beige props with one red shirt on a line is a photograph; a
+ * street of beige props with a beige sheet on a line is a render. The hues are
+ * the ones that actually turn up on a domestic line — whites and creams
+ * dominate, then a handful of dyed garments — and saturated pieces are capped
+ * per run so the line does not turn into bunting.
+ */
+const LAUNDRY_HUES = [0.02, 0.09, 0.13, 0.33, 0.55, 0.60];
+
+function laundryTint(out, rand, saturatedLeft) {
+  const dyed = saturatedLeft > 0 && rand() < 0.55;
+  if (dyed) {
+    const h = LAUNDRY_HUES[(rand() * LAUNDRY_HUES.length) | 0];
+    _hsl.setHSL(h, 0.15 + rand() * 0.40, 0.45 + rand() * 0.35);
+  } else {
+    // Not pure white: unbleached cotton dried in a dusty street.
+    _hsl.setHSL(0.09, 0.03 + rand() * 0.05, 0.62 + rand() * 0.24);
+  }
+  tintFor(out, _hsl, BASE_LIGHT);
+  return dyed;
+}
+
+/** Awning cloth: cream dominant, then the two faded shop colours. */
+function awningTint(out, rand) {
+  const r = rand();
+  const hex = r < 0.45 ? 0xc9bda4 : r < 0.70 ? 0x8a3f34 : r < 0.90 ? 0x4d5f53 : 0xc9bda4;
+  _hsl.set(hex);
+  tintFor(out, _hsl, BASE_CANVAS);
+  return r >= 0.90;   // the last band is the striped one
 }
 
 /** First hit looking straight across from a point, or null. */
@@ -128,21 +193,36 @@ export function overheadLines(ctx, site, bs, rand, density = 1) {
           parts++;
         }
 
-        // Washing pegged to the lower line, and a stub bracket at each end.
-        if (pass === 1 && rand() < 0.55) {
-          const nCloth = 2 + ((rand() * 4) | 0);
+        // Washing pegged to the lower line.
+        //
+        // Three things changed here and all three are visible in street.png.
+        // (1) `fabric_light` instead of `fabric_canvas`: cotton, and it carries
+        // a translucency of 0.78 against canvas's 0.55, so a backlit sheet has
+        // a chance of glowing instead of going to pure silhouette. (2)
+        // `shellGeo` instead of `twoSided`: a 4 mm shell with a stitched rim,
+        // so the edge of the sheet catches a lit line instead of terminating
+        // in a mathematically sharp cut-out — that razor edge against bright
+        // sky is what made these read as black trapezoids. (3) a real garment
+        // palette through `tintFor` rather than a warm/cool jitter.
+        if (pass === 1 && rand() < 0.88) {
+          const nCloth = 4 + ((rand() * 5) | 0);
+          let saturatedLeft = 3;
           for (let k = 0; k < nCloth; k++) {
-            const s = 0.18 + (k + rand() * 0.6) / (nCloth + 1) * 0.64;
+            const s = 0.14 + (k + rand() * 0.5) / (nCloth + 0.3) * 0.72;
             const cx = ax + (far.x - ax) * s + f.nx * 0.25 * (1 - 2 * s);
             const cz = az + (far.z - az) * s + f.nz * 0.25 * (1 - 2 * s);
             const drop = Math.sin(Math.PI * s) * (0.6 + far.d * 0.05);
-            const cw = 0.35 + rand() * 0.5, ch = 0.5 + rand() * 0.7;
-            const cloth = twoSided(clothGeo(cw, ch, 0.1, rand, 0.12));
-            // Washing is the one thing in a dust-coloured street that is
-            // allowed real chroma, so it gets a wide hue spread and a lift.
-            jitterColor(_c, rand, 0.24, 0.62, 0);
-            _c.multiplyScalar(1.35);
-            bs.add('fabric_canvas', cloth, cx, y - drop - ch * 0.5, cz,
+            // Real sizes: a double sheet is 2 m across and a towel 0.7 m, and
+            // the first pass authored everything at towel scale, which is why
+            // a line of washing read as a row of postage stamps at 20 m.
+            const big = rand() < 0.4;
+            const cw = big ? 1.1 + rand() * 0.9 : 0.45 + rand() * 0.55;
+            const ch = big ? 0.9 + rand() * 0.8 : 0.55 + rand() * 0.6;
+            // Sag scales with the span it is pegged across, per the reference
+            // measurement: a sheet on a line bellies about a tenth of its width.
+            const cloth = shellGeo(clothGeo(cw, ch, 0.10 * cw, rand, 0.10), SHELL_T.laundry);
+            if (laundryTint(_c, rand, saturatedLeft)) saturatedLeft--;
+            bs.add('fabric_light', cloth, cx, y - drop - ch * 0.5, cz,
               0, Math.atan2(ux, uz) + (rand() - 0.5) * 0.5, 0, 1, 1, 1, _c, true);
             parts++;
           }
@@ -161,66 +241,124 @@ export function overheadLines(ctx, site, bs, rand, density = 1) {
  * angle brackets and torn canvas on bent tube frames, which is the single most
  * recognisable silhouette in the reference frames.
  */
-export function awnings(ctx, site, bs, rand, density = 1) {
+/**
+ * One awning, in real shopfront dimensions.
+ *
+ * Front rail at base + 3.05, wall fixing at base + 3.40, 1.65 m of projection:
+ * that is a 12 degree fall, which is what a real retractable awning is set to
+ * so rain runs off and a person can stand under the front edge. The number
+ * that actually earns its place is the VALANCE — the 0.30 m scalloped skirt
+ * hanging off the front rail. At 20 m an awning without one is a grey wedge;
+ * with one it is unmistakably a shop.
+ */
+function oneAwning(bs, rand, g, cx, cz, nx, nz, base, w) {
+  const yaw = Math.atan2(nx, nz);
+  const ux = nz, uz = -nx;                    // along the facade
+  const proj = 1.65;
+  const yFront = base + 3.05, yBack = base + 3.40;
+  const pitch = Math.atan2(yBack - yFront, proj);
+  const yMid = (yFront + yBack) * 0.5;
+  let parts = 0;
+
+  // Frame: two rakers and a front rail.
+  jitterColor(_c, rand, 0.3, 0.08, 0.05);
+  for (const s of [-1, 1]) {
+    const ox = cx + ux * s * w * 0.46, oz = cz + uz * s * w * 0.46;
+    bs.addPitched('metal_rusted', g.barOut, ox + nx * proj * 0.5, yMid,
+      oz + nz * proj * 0.5, yaw, pitch, 0, 1, 1, proj * 1.1, _c, true);
+    parts++;
+  }
+  bs.add('metal_rusted', g.barAlong, cx + nx * proj, yFront, cz + nz * proj,
+    0, yaw, 0, w * 1.06, 1, 1, _c, true);
+  parts++;
+
+  if (rand() < 0.15) {
+    // One in seven is a corrugated lean-to rather than cloth.
+    jitterColor(_c, rand, 0.2, 0.05, 0.05);
+    _c.multiplyScalar(0.82);
+    bs.addPitched('metal_corrugated', g.sheet, cx + nx * proj * 0.5, yMid,
+      cz + nz * proj * 0.5, yaw, pitch, 0, w, 1, proj * 1.04, _c, true);
+    return parts + 1;
+  }
+
+  // The pitch has to be applied about the awning's own long axis, which is why
+  // these go through addPitched rather than add: the default XYZ Euler rotates
+  // about world X and stands the sheet on its edge on any wall that does not
+  // face along Z.
+  const striped = awningTint(_c, rand);
+  const tint = _c.clone();
+  const cloth = shellGeo(layFlat(clothGeo(w, proj * 1.02, 0.18, rand, 0.10)), SHELL_T.canvas);
+  bs.addPitched('fabric_canvas', cloth, cx + nx * proj * 0.5, yMid + 0.02,
+    cz + nz * proj * 0.5, yaw, pitch, 0, 1, 1, 1, tint, true);
+  parts++;
+
+  // Valance. Torn hem, hung 2 cm proud of the rail so it does not z-fight it.
+  const vh = 0.30;
+  const val = shellGeo(clothGeo(w, vh, 0.02, rand, 0.16), SHELL_T.canvas);
+  bs.add('fabric_canvas', val, cx + nx * (proj + 0.02), yFront - vh * 0.5,
+    cz + nz * (proj + 0.02), 0, yaw, 0, 1, 1, 1, tint, true);
+  parts++;
+
+  // A striped awning gets a second, narrower valance in the off colour laid
+  // over the first — two draws' worth of geometry in the same bucket, zero
+  // extra draws, and it is the cheapest way to say "stripes" without a texture.
+  if (striped) {
+    _c.copy(tint).multiplyScalar(0.55);
+    const band = shellGeo(clothGeo(w * 0.5, vh * 0.9, 0.02, rand, 0.16), SHELL_T.canvas);
+    bs.add('fabric_canvas', band, cx + nx * (proj + 0.035), yFront - vh * 0.5,
+      cz + nz * (proj + 0.035), 0, yaw, 0, 1, 1, 1, _c, false);
+    parts++;
+  }
+  return parts;
+}
+
+/**
+ * Shopfront awnings over the pavement, bound to the facade's own window bays.
+ *
+ * This used to place at a random `t` every 9 m, which is why goldenhour's
+ * canopy floats over blank wall with no opening under it. `facadeDetail`
+ * publishes the bay centres it actually cut, props-core forwards them as
+ * `env.bays`, and an awning belongs over a shopfront or nowhere. The old
+ * random walk is kept as the degradation path for a wave where the bay list
+ * has not landed.
+ */
+export function awnings(ctx, site, bs, rand, density = 1, env = null) {
   const g = geo();
   let parts = 0;
+
+  // --- Preferred path: real bays.
+  const bays = Array.isArray(env?.bays) ? env.bays : [];
+  let placed = 0;
+  for (const b of bays) {
+    if (!b || typeof b.x !== 'number' || typeof b.z !== 'number') continue;
+    const f = b.f || b.facade || null;
+    const nx = b.nx ?? f?.nx, nz = b.nz ?? f?.nz;
+    if (typeof nx !== 'number' || typeof nz !== 'number') continue;
+    // Ground-floor bays only: an awning over a third-storey window is a canopy
+    // over nothing. Anything that does not declare a storey is assumed usable.
+    if (b.shop === false || (b.storey !== undefined && b.storey > 0)) continue;
+    if (rand() > 0.35 * density) continue;
+    const base = b.base ?? f?.base ?? site.groundAt(b.x, b.z);
+    if (base === null || base === undefined) continue;
+    if (site.groundAt(b.x + nx * 1.4, b.z + nz * 1.4) === null) continue;
+    parts += oneAwning(bs, rand, g, b.x, b.z, nx, nz, base, (b.w || b.width || 2.4) * 0.9);
+    placed++;
+  }
+  if (placed) return { parts };
+
+  // --- Degradation: no bay list this wave, so fall back to spacing along the
+  // facade. Same awning, worse placement.
   for (const f of site.facades) {
     const len = Math.hypot(f.bx - f.ax, f.bz - f.az);
     if (len < 5) continue;
     const ux = (f.bx - f.ax) / len, uz = (f.bz - f.az) / len;
-    const yaw = Math.atan2(f.nx, f.nz);
     const n = Math.round(len / 9 * density);
     for (let i = 0; i < n; i++) {
       const t = (i + 0.35 + rand() * 0.3) / Math.max(1, n);
       const cx = f.ax + ux * len * t, cz = f.az + uz * len * t;
       // Only where there is pavement to stand under.
-      const gy = site.groundAt(cx + f.nx * 1.4, cz + f.nz * 1.4);
-      if (gy === null) continue;
-      const w = 2.2 + rand() * 2.6;
-      const depth = 1.1 + rand() * 0.8;
-      const y = f.base + 2.7 + rand() * 0.5;
-      const droop = 0.22 + rand() * 0.25;
-      const metal = rand() < 0.5;
-
-      // Frame: two rakers and a front rail.
-      jitterColor(_c, rand, 0.3, 0.08, 0.05);
-      for (const s of [-1, 1]) {
-        const ox = cx + ux * s * w * 0.45, oz = cz + uz * s * w * 0.45;
-        bs.addPitched('metal_rusted', g.barOut, ox + f.nx * depth * 0.5, y - droop * 0.5,
-          oz + f.nz * depth * 0.5, yaw, Math.atan2(droop, depth), 0, 1, 1, depth * 1.12, _c, true);
-        parts++;
-      }
-      bs.add('metal_rusted', g.barAlong, cx + f.nx * depth, y - droop,
-        cz + f.nz * depth, 0, yaw, 0, w * 1.05, 1, 1, _c, true);
-      parts++;
-
-      // The pitch has to be applied about the awning's own long axis, which is
-      // why these go through addPitched rather than add: the default XYZ Euler
-      // rotates about world X and stands the sheet on its edge on any wall that
-      // does not face along Z.
-      const pitch = Math.atan2(droop, depth);
-      if (metal) {
-        jitterColor(_c, rand, 0.2, 0.05, 0.05);
-        _c.multiplyScalar(0.82);
-        bs.addPitched('metal_corrugated', g.sheet, cx + f.nx * depth * 0.5, y - droop * 0.5,
-          cz + f.nz * depth * 0.5, yaw, pitch, 0, w, 1, depth * 1.08, _c, true);
-        parts++;
-      } else {
-        const cloth = twoSided(layFlat(clothGeo(w, depth * 1.15, droop * 1.6, rand, 0.16)));
-        jitterColor(_c, rand, 0.26, 0.3, 0.12);
-        _c.multiplyScalar(1.12);
-        bs.addPitched('fabric_canvas', cloth, cx + f.nx * depth * 0.5, y - droop * 0.4,
-          cz + f.nz * depth * 0.5, yaw, pitch, 0, 1, 1, 1, _c, true);
-        parts++;
-        // A torn flap hanging off the front edge.
-        if (rand() < 0.6) {
-          const flap = twoSided(clothGeo(w * (0.25 + rand() * 0.4), 0.5 + rand() * 0.6, 0.06, rand, 0.3));
-          bs.add('fabric_canvas', flap, cx + ux * (rand() - 0.5) * w * 0.6 + f.nx * depth,
-            y - droop - 0.3, cz + uz * (rand() - 0.5) * w * 0.6 + f.nz * depth,
-            0, yaw, 0, 1, 1, 1, _c, true);
-          parts++;
-        }
-      }
+      if (site.groundAt(cx + f.nx * 1.4, cz + f.nz * 1.4) === null) continue;
+      parts += oneAwning(bs, rand, g, cx, cz, f.nx, f.nz, f.base, 2.2 + rand() * 2.0);
     }
   }
   return { parts };
