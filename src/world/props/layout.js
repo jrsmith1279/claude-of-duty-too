@@ -580,10 +580,33 @@ export class BatchSet {
     this.name = name;
     this.allowShadow = allowShadow;
     this.zoneLen = zoneLen;
-    /** @type {Map<string,{batch:Batch,key:string,shadow:boolean}>} */
+    /** @type {Map<string,{batch:Batch,key:string,shadow:boolean,overrides:object|null}>} */
     this.buckets = new Map();
+    /** @type {Map<string,{key:string,overrides:object}>} */
+    this.variants = new Map();
     this.pieces = 0;
     this.z0 = 40;
+  }
+
+  /**
+   * Registers a named material variant usable anywhere a material key is.
+   *
+   * A set applies ONE shared overrides object to every bucket it emits, which
+   * cannot express car paint plus car trim plus glazing inside one set — and
+   * splitting them into three sets would mean three sets' worth of zone
+   * bookkeeping for one object. So a bucket may instead be keyed by a variant
+   * name, and `build()` resolves `ctx.materials.get(key, overrides)` per
+   * bucket. `Materials.get` caches non-structural overrides as a
+   * program-inheriting clone, so a variant costs a draw call and zero shader
+   * programs.
+   *
+   * @param {string} name what callers pass as `matKey`
+   * @param {string} key the real material key it is based on
+   * @param {object} overrides non-structural material properties
+   */
+  variant(name, key, overrides) {
+    this.variants.set(name, { key, overrides: overrides || {} });
+    return this;
   }
 
   zoneOf(z) {
@@ -596,7 +619,13 @@ export class BatchSet {
     const id = `${matKey}|${this.zoneOf(z)}|${shadow ? 1 : 0}`;
     let b = this.buckets.get(id);
     if (!b) {
-      b = { batch: new Batch(`${this.name}:${id}`), key: matKey, shadow };
+      const v = this.variants.get(matKey);
+      b = {
+        batch: new Batch(`${this.name}:${id}`),
+        key: v ? v.key : matKey,
+        overrides: v ? v.overrides : null,
+        shadow,
+      };
       this.buckets.set(id, b);
     }
     return b;
@@ -656,7 +685,10 @@ export class BatchSet {
     for (const b of this.buckets.values()) {
       const geo = b.batch.build();
       if (!geo) continue;
-      const overrides = { vertexColors: true, ...(opts.overrides || {}) };
+      // Per-bucket variant overrides sit under the set-wide ones: a set built
+      // with an explicit overrides object still wins, so nothing that already
+      // passes `opts.overrides` changes behaviour.
+      const overrides = { vertexColors: true, ...(b.overrides || null), ...(opts.overrides || null) };
       let mat;
       try {
         mat = ctx.materials?.get(b.key, overrides);

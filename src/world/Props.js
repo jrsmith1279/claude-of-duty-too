@@ -45,6 +45,59 @@ import { streetFurniture } from './props/furniture.js';
 
 const SEED = 0x5eed1;
 
+/**
+ * Optional prop modules that may not exist yet.
+ *
+ * `import.meta.glob` is resolved by Vite at build time against the files that
+ * are actually on disk, so a wave where `groundworks.js` or `streetside.js`
+ * has not landed yet produces an empty map and no runtime request at all. A
+ * plain `import()` of a missing path would 404 at runtime and put a console
+ * error in every screenshot report, which is exactly what the harness gates on.
+ */
+const OPTIONAL_MODULES = import.meta.glob([
+  './props/groundworks.js',
+  './props/streetside.js',
+]);
+
+/**
+ * Damp-patch decal bucket configuration. Blended, no depth write, pulled
+ * towards the camera so it never z-fights the surface it darkens, and
+ * noticeably smoother than the dry material underneath — that roughness delta
+ * is the whole reason it exists.
+ */
+const DAMP_OVERRIDES = {
+  transparent: true,
+  depthWrite: false,
+  alphaTest: 0.03,
+  roughness: 0.40,
+  metalness: 0,
+  envMapIntensity: 0.85,
+  polygonOffset: true,
+  polygonOffsetFactor: -3,
+  polygonOffsetUnits: -8,
+  vertexColors: true,
+};
+
+/**
+ * Paint / trim / glazing variants for the vehicle set.
+ *
+ * A merged batch shares one material per bucket, so a car built from a single
+ * material key is a car made of one substance. The variant registry keys a
+ * bucket by name instead, and `Materials.get` returns a program-inheriting
+ * clone for non-structural overrides — so this table costs zero shader
+ * programs and one draw per variant actually used.
+ */
+const VEHICLE_VARIANTS = [
+  ['car_paint', 'metal_painted', { clearcoat: 1.0, clearcoatRoughness: 0.06, roughness: 0.34, metalness: 0.15 }],
+  ['car_paint_dull', 'metal_painted', { roughness: 0.62, metalness: 0.1 }],
+  ['car_trim', 'metal_painted', { roughness: 0.48, metalness: 0.55, color: 0x6a6a68 }],
+  ['car_chrome', 'steel_brushed', { roughness: 0.18, metalness: 1.0, envMapIntensity: 1.4 }],
+  ['car_glass', 'glass', { roughness: 0.08, metalness: 0, envMapIntensity: 1.25 }],
+  ['car_rubber', 'rubber', { roughness: 0.86, metalness: 0 }],
+  ['car_rust', 'metal_rusted', { roughness: 0.82, metalness: 0.25 }],
+  ['car_underside', 'metal_rusted', { roughness: 0.95, metalness: 0.1, color: 0x3a352f }],
+];
+
 export class PropSystem {
   async init(ctx) {
     this.ctx = ctx;
@@ -71,6 +124,16 @@ export class PropSystem {
 
     const parent = ctx.level?.root || ctx.scene;
     if (parent) parent.add(root); else return;
+
+    // Resolve the optional modules before the build, which is synchronous.
+    this._optional = {};
+    for (const load of Object.values(OPTIONAL_MODULES)) {
+      try {
+        Object.assign(this._optional, await load());
+      } catch (e) {
+        console.warn('[props] optional module failed to load, skipping', e);
+      }
+    }
 
     const t0 = (globalThis.performance || Date).now();
     try {
@@ -106,30 +169,74 @@ export class PropSystem {
     const decalSoft = new BatchSet('decalSoft', Infinity, false);
     const decalHard = new BatchSet('decalHard', Infinity, false);
 
-    let pieces = 0;
-    // Structure before scatter: the facade and roof passes claim their ground
-    // with site.occupy(), and the clutter fields respect it.
-    pieces += facadeDetail(ctx, site, core, rand, 1).parts;
-    pieces += rooftops(ctx, site, core, rand, 1).parts;
-    pieces += awnings(ctx, site, core, rand, 1).parts;
-    pieces += overheadLines(ctx, site, core, rand, 1).parts;
-    pieces += fireEscape(ctx, site, core, rand).parts;
-    const furniture = streetFurniture(ctx, site, core, rand, 1);
-    pieces += furniture.parts;
-    this._colliders = furniture.colliders;
-    pieces += rubblePiles(ctx, site, core, rand, 1).pieces;
-    pieces += wallDrifts(ctx, site, detail, rand, 1).pieces;
-    pieces += wallBerms(ctx, site, core, rand, 1).pieces;
-    pieces += scatterGround(ctx, site, fine, rand, 1).pieces;
+    // New sets, all empty until a consumer puts geometry in one. A BatchSet
+    // with no buckets emits no mesh, so publishing these costs nothing.
+    const winSet = new BatchSet('windows', Infinity, false);   // facade glazing atlas
+    const winLit = new BatchSet('winLit', Infinity, false);    // emissive night variant
+    const decalDamp = new BatchSet('decalDamp', Infinity, false);
+    // Default zone length (45 m) and shadows on, exactly like `core`. Raising
+    // ZONE_LEN to 80 to fund the vehicle draws was considered and rejected: on
+    // a 110x80 m map it collapses three Z-zones into two and therefore doubles
+    // what a down-the-street shot rasterises. The frame is shading-bound, not
+    // submission-bound, so trading fill for draws is backwards.
+    const vehicles = new BatchSet('vehicles');
+    for (const [name, key, over] of VEHICLE_VARIANTS) vehicles.variant(name, key, over);
 
     const kit = new DecalKit(0xd3ca1);
     this.decalKit = kit;
+
+    /**
+     * THE WAVE'S COORDINATION MECHANISM.
+     *
+     * Every prop module now takes one trailing options object. JS ignores
+     * extra arguments, so appending it is a no-op for a module that has not
+     * been updated, and a module that wants a new bucket or a piece of
+     * cross-module data reads its own field out of here with no further edit
+     * to this file. That is what lets six agents extend the prop system in
+     * parallel without ever touching the same line.
+     *
+     * Consumers must treat every field as possibly absent and degrade.
+     */
+    const envOverrides = {};
+    const env = {
+      site, kit, rand,
+      core, detail, fine,
+      decalSoft, decalHard, decalDamp,
+      winSet, winLit, vehicles,
+      envOverrides,
+      bays: [],
+      hotspots: [],
+      colliders: [],
+    };
+
+    let pieces = 0;
+    // Structure before scatter: the facade and roof passes claim their ground
+    // with site.occupy(), and the clutter fields respect it.
+    const fac = facadeDetail(ctx, site, core, rand, 1, env);
+    pieces += fac.parts;
+    env.bays = fac.bays || [];
+    pieces += rooftops(ctx, site, core, rand, 1, env).parts;
+    pieces += awnings(ctx, site, core, rand, 1, env).parts;
+    pieces += overheadLines(ctx, site, core, rand, 1, env).parts;
+    pieces += fireEscape(ctx, site, core, rand).parts;
+    const furniture = streetFurniture(ctx, site, core, rand, 1, env);
+    pieces += furniture.parts;
+    this._colliders = furniture.colliders;
+    env.colliders = this._colliders;
+    env.hotspots = furniture.hotspots || [];
+    pieces += this._optionalPass('streetside', ctx, site, core, rand, 1, env);
+    pieces += rubblePiles(ctx, site, core, rand, 1, 26, env).pieces;
+    pieces += wallDrifts(ctx, site, detail, rand, 1, env).pieces;
+    pieces += wallBerms(ctx, site, core, rand, 1, env).pieces;
+    pieces += scatterGround(ctx, site, fine, rand, 1, env).pieces;
+
     let dec = 0;
-    dec += groundDecals(ctx, site, decalSoft, decalHard, kit, rand, 1).count;
-    dec += tyreTracks(ctx, site, decalHard, kit, rand, 1).count;
-    dec += wallDecals(ctx, site, decalSoft, decalHard, kit, rand, 1).count;
-    dec += hotspotDecals(ctx, site, decalSoft, decalHard, kit, rand, furniture.hotspots).count;
-    dec += groundingDust(ctx, site, decalSoft, kit, rand, this._colliders).count;
+    dec += groundDecals(ctx, site, decalSoft, decalHard, kit, rand, 1, env).count;
+    dec += tyreTracks(ctx, site, decalHard, kit, rand, 1, env).count;
+    dec += wallDecals(ctx, site, decalSoft, decalHard, kit, rand, 1, env).count;
+    dec += hotspotDecals(ctx, site, decalSoft, decalHard, kit, rand, furniture.hotspots, env).count;
+    dec += groundingDust(ctx, site, decalSoft, kit, rand, this._colliders, env).count;
+    dec += this._optionalPass('groundworks', ctx, site, decalHard, rand, 1, env);
 
     // Tier order is "what to shed first", and that is decided by cost per unit
     // of frame, not by how much geometry it is. The blended decals are one mesh
@@ -137,16 +244,41 @@ export class PropSystem {
     // surface writes no depth and every pixel it covers re-runs the standard
     // shader with a three-cascade PCSS lookup. So they go last-in, first-out.
     this.tiers[0] = core.build(ctx, this.root);
+    this.tiers[0].push(...vehicles.build(ctx, this.root));
+    this.tiers[0].push(...winSet.build(ctx, this.root, { overrides: envOverrides.win || undefined }));
+    this.tiers[0].push(...winLit.build(ctx, this.root, { overrides: envOverrides.winLit || undefined }));
     this.tiers[1] = detail.build(ctx, this.root);
     this.tiers[1].push(...fine.build(ctx, this.root));
     this.tiers[1].push(...decalHard.build(ctx, this.root, { overrides: kit.overrides(false) }));
     this.tiers[2] = decalSoft.build(ctx, this.root, {
       overrides: kit.overrides(true), renderOrder: 3,
     });
+    // Damp patches shed first: a blended surface with no depth write re-runs
+    // the full PCSS-lit standard shader for every pixel it covers.
+    this.tiers[2].push(...decalDamp.build(ctx, this.root, {
+      overrides: { ...DAMP_OVERRIDES, ...(envOverrides.damp || null) }, renderOrder: 3,
+    }));
 
     this.stats.pieces = pieces;
     this.stats.decals = dec;
     this._tally();
+  }
+
+  /**
+   * Runs an optional module if it landed. Wrapped so a half-finished wave
+   * still boots with everything else intact — a module that throws costs its
+   * own content and nothing more.
+   */
+  _optionalPass(name, ...args) {
+    const fn = this._optional?.[name];
+    if (typeof fn !== 'function') return 0;
+    try {
+      const r = fn(...args);
+      return (r?.parts || 0) + (r?.pieces || 0) + (r?.count || 0);
+    } catch (e) {
+      console.warn(`[props] ${name}() failed, skipping`, e);
+      return 0;
+    }
   }
 
   _tally() {
