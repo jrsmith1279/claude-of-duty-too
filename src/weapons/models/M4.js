@@ -40,6 +40,8 @@ const HG_R = 0.0218;
 const MUZZLE_Z = -0.4555;
 const PORT_Z0 = -0.052, PORT_Z1 = -0.006;
 const MAG_TOP_Y = -0.0215;
+const MAG_DEPTH = 0.0620;    // fore/aft: a 5.56 round is 57 mm long and lies in the mag
+const MAG_Z = -0.0300;
 
 export function buildM4(resolve) {
   const root = new THREE.Group();
@@ -93,31 +95,36 @@ export function buildM4(resolve) {
   // ------------------------------------------------------------------- lower
   {
     const p = P('lower');
-    // Magwell + flare.
-    p.add('black', chamferBox(0.0385, 0.0580, 0.0520, { r: 0.0060, bevel: 0.0013, curveSegments: 3 }), { y: -0.0490, z: -0.0120 });
-    p.add('black', chamferBox(0.0432, 0.0105, 0.0570, { r: 0.0050, bevel: 0.0016 }), { y: -0.0762, z: -0.0120 });
+    // Magwell. The depth is the number people get wrong: a STANAG magazine is a
+    // *blade* — 26 mm across but 62 mm fore-and-aft, because a 5.56 cartridge is
+    // 57 mm long and lies pointing down the bore. Modelled as a rod it reads as
+    // a bottle hanging off the gun, which is exactly how the first pass looked.
+    p.add('black', chamferBox(0.0335, 0.0570, MAG_DEPTH + 0.014, { r: 0.0055, bevel: 0.0013, curveSegments: 3 }), { y: -0.0480, z: MAG_Z });
+    p.add('black', chamferBox(0.0385, 0.0105, MAG_DEPTH + 0.020, { r: 0.0048, bevel: 0.0016 }), { y: -0.0745, z: MAG_Z });
     // Rear body carrying the fire-control group, and the buffer tower.
-    p.add('black', chamferBox(0.0365, 0.0300, 0.0870, { r: 0.0055, bevel: 0.0013 }), { y: -0.0330, z: 0.0375 });
-    p.add('black', chamferProfile(polyShape([-0.020, -0.006, 0.014, -0.020, 0.026, 0.004, 0.026, 0.020, -0.020, 0.020]), 0.0345, { bevel: 0.0012 }), { y: -0.0100, z: 0.0620, ry: Math.PI / 2 });
+    p.add('black', chamferBox(0.0365, 0.0300, 0.0760, { r: 0.0055, bevel: 0.0013 }), { y: -0.0330, z: 0.0450 });
+    p.add('black', chamferProfile(polyShape([-0.020, -0.006, 0.014, -0.020, 0.026, 0.004, 0.026, 0.020, -0.020, 0.020]), 0.0345, { bevel: 0.0012 }), { y: -0.0100, z: 0.0680, ry: Math.PI / 2 });
     // Front lug / pivot pin boss.
-    p.add('black', chamferBox(0.0300, 0.0250, 0.0200, { r: 0.0045, bevel: 0.0012 }), { y: -0.0270, z: -0.0500 });
+    p.add('black', chamferBox(0.0300, 0.0250, 0.0200, { r: 0.0045, bevel: 0.0012 }), { y: -0.0270, z: -0.0850 });
     // Trigger guard: bottom bar plus front post, both with real chamfers.
-    p.add('black', chamferBox(0.0105, 0.0062, 0.0480, { r: 0.0022, bevel: 0.0010 }), { y: -0.0812, z: 0.0180 });
-    p.add('black', chamferBox(0.0105, 0.0320, 0.0062, { r: 0.0022, bevel: 0.0010 }), { y: -0.0660, z: -0.0035 });
-    // Pistol grip, raked back 23 degrees, with three finger grooves.
-    p.add('polymer', chamferBox(0.0320, 0.1060, 0.0405, { r: 0.0105, bevel: 0.0018, curveSegments: 3 }), { y: -0.0980, z: 0.0580, rx: 0.40 });
-    p.add('polymer', chamferBox(0.0345, 0.0085, 0.0430, { r: 0.0050, bevel: 0.0014 }), { y: -0.1480, z: 0.0790, rx: 0.40 });
+    p.add('black', chamferBox(0.0105, 0.0062, 0.0500, { r: 0.0022, bevel: 0.0010 }), { y: -0.0800, z: 0.0330 });
+    p.add('black', chamferBox(0.0105, 0.0320, 0.0062, { r: 0.0022, bevel: 0.0010 }), { y: -0.0650, z: 0.0100 });
+    // Pistol grip, raked back 23 degrees, with three recessed finger grooves.
+    p.add('polymer', chamferBox(0.0300, 0.1010, 0.0365, { r: 0.0062, bevel: 0.0018, curveSegments: 3 }), { y: -0.0975, z: 0.0680, rx: 0.40 });
+    p.add('polymer', chamferBox(0.0330, 0.0085, 0.0395, { r: 0.0045, bevel: 0.0014 }), { y: -0.1450, z: 0.0880, rx: 0.40 });
     for (let i = 0; i < 3; i++) {
-      p.add('polymer', cyl(0.0042, 0.0042, 0.0300, 8), { x: 0, y: -0.0700 - i * 0.0225, z: 0.0430 + i * 0.0098, ry: Math.PI / 2 });
+      p.add('void', cyl(0.0038, 0.0038, 0.0272, 8), { x: 0, y: -0.0700 - i * 0.0230, z: 0.0525 + i * 0.0100, ry: Math.PI / 2 });
     }
+    // Stippled texture panel on the backstrap.
+    p.add('void', chamferBox(0.0245, 0.0620, 0.0035, { r: 0.0012, bevel: 0.0008 }), { y: -0.0940, z: 0.0855, rx: 0.40 });
     // Beavertail behind the grip.
-    p.add('polymer', chamferBox(0.0300, 0.0180, 0.0140, { r: 0.0055, bevel: 0.0012 }), { y: -0.0455, z: 0.0740, rx: 0.5 });
+    p.add('polymer', chamferBox(0.0300, 0.0180, 0.0140, { r: 0.0055, bevel: 0.0012 }), { y: -0.0450, z: 0.0830, rx: 0.5 });
     // Magazine release with its fence, bolt catch, takedown pins.
-    p.add('black', cyl(0.0072, 0.0072, 0.0075, 10), { x: 0.0196, y: -0.0300, z: -0.0335, ry: Math.PI / 2 });
-    p.add('steel', cyl(0.0046, 0.0046, 0.0125, 10), { x: 0.0215, y: -0.0300, z: -0.0335, ry: Math.PI / 2 });
-    p.add('black', chamferBox(0.0060, 0.0155, 0.0300, { r: 0.0022, bevel: 0.0009 }), { x: -0.0202, y: -0.0290, z: -0.0300 });
-    p.add('black', chamferBox(0.0048, 0.0100, 0.0105, { r: 0.0018, bevel: 0.0008 }), { x: -0.0218, y: -0.0330, z: -0.0400 });
-    for (const z of [-0.0500, 0.0530]) {
+    p.add('black', cyl(0.0072, 0.0072, 0.0075, 10), { x: 0.0196, y: -0.0300, z: MAG_Z + 0.026, ry: Math.PI / 2 });
+    p.add('steel', cyl(0.0046, 0.0046, 0.0125, 10), { x: 0.0215, y: -0.0300, z: MAG_Z + 0.026, ry: Math.PI / 2 });
+    p.add('black', chamferBox(0.0060, 0.0155, 0.0300, { r: 0.0022, bevel: 0.0009 }), { x: -0.0202, y: -0.0290, z: MAG_Z + 0.030 });
+    p.add('black', chamferBox(0.0048, 0.0100, 0.0105, { r: 0.0018, bevel: 0.0008 }), { x: -0.0218, y: -0.0330, z: MAG_Z + 0.020 });
+    for (const z of [-0.0850, 0.0620]) {
       p.addMirrored('steel', cyl(0.0040, 0.0040, 0.0032, 10), { x: 0.0192, y: z < 0 ? -0.0250 : -0.0245, z, ry: Math.PI / 2 });
     }
     p.group.name = 'lower';
@@ -145,6 +152,13 @@ export function buildM4(resolve) {
     }
     // Continuous top rail, co-planar with the receiver's.
     p.add('black', picatinny(Math.abs(len) - 0.012), { y: RAIL_Y, z: zc });
+    // M-LOK slots: recessed dark plates, so the flanks read as cut rather than
+    // printed. Three faces get them; the fourth carries the rail.
+    for (let i = 0; i < 4; i++) {
+      const z = HG_Z0 - 0.030 - i * 0.044;
+      p.addMirrored('void', chamferBox(0.0032, 0.0090, 0.0300, { r: 0.0012, bevel: 0.0008 }), { x: HG_R - 0.0024, y: 0, z });
+      p.add('void', chamferBox(0.0090, 0.0032, 0.0300, { r: 0.0012, bevel: 0.0008 }), { y: -(HG_R - 0.0024), z });
+    }
     // End cap and a short 3-o'clock accessory rail section.
     p.add('black', ring(HG_R - 0.0008, 0.0038, 18, 6), { z: HG_Z1 - 0.002 });
     p.add('black', picatinny(0.052, { pitch: 0.0102 }), { x: HG_R - 0.0016, y: 0, z: HG_Z1 + 0.048, rz: -Math.PI / 2 });
@@ -205,13 +219,15 @@ export function buildM4(resolve) {
     const p = P('magazine');
     // Polymer 30-round box, 12 degrees of curl, ribbed. Built downward from the
     // magwell mouth so the rig can slide it straight out along its own axis.
-    p.add('polymer', curvedStack(0.0250, 0.0230, 0.1740, 0.21, 9, { taper: 0.06, r: 0.0055, gap: 0.0007 }), { y: MAG_TOP_Y, z: -0.0125 });
-    p.add('polymer', chamferBox(0.0292, 0.0110, 0.0290, { r: 0.0035, bevel: 0.0013 }), { y: MAG_TOP_Y - 0.1780, z: 0.0140, rx: 0.21 });
-    p.add('polymer', chamferBox(0.0262, 0.0130, 0.0250, { r: 0.0035, bevel: 0.0012 }), { y: MAG_TOP_Y - 0.0080, z: -0.0125 });
-    // Witness holes down the right flank.
-    for (let i = 0; i < 4; i++) p.addMirrored('black', cyl(0.0022, 0.0022, 0.0035, 8), { x: 0.0126, y: MAG_TOP_Y - 0.055 - i * 0.030, z: -0.0125 + i * 0.0032, ry: Math.PI / 2 });
-    // A brass round visible at the feed lips.
-    p.add('brass', cyl(0.0028, 0.0028, 0.0230, 10), { y: MAG_TOP_Y + 0.0055, z: -0.0125 });
+    p.add('polymer', curvedStack(0.0262, MAG_DEPTH, 0.1820, 0.20, 10, { taper: 0.035, r: 0.0032, gap: 0.0009 }), { y: MAG_TOP_Y, z: MAG_Z });
+    // Floorplate.
+    p.add('polymer', chamferBox(0.0300, 0.0115, MAG_DEPTH + 0.006, { r: 0.0030, bevel: 0.0013 }), { y: MAG_TOP_Y - 0.1862, z: MAG_Z + 0.0180, rx: 0.20 });
+    p.add('polymer', chamferBox(0.0270, 0.0120, MAG_DEPTH - 0.002, { r: 0.0028, bevel: 0.0012 }), { y: MAG_TOP_Y - 0.0075, z: MAG_Z });
+    // Witness holes and the moulded grip ribs down each flank.
+    for (let i = 0; i < 4; i++) p.addMirrored('void', cyl(0.0024, 0.0024, 0.0035, 8), { x: 0.0130, y: MAG_TOP_Y - 0.052 - i * 0.032, z: MAG_Z - 0.020 + i * 0.0030, ry: Math.PI / 2 });
+    for (let i = 0; i < 3; i++) p.addMirrored('void', chamferBox(0.0035, 0.0300, 0.0090, { r: 0.0012, bevel: 0.0008 }), { x: 0.0128, y: MAG_TOP_Y - 0.100, z: MAG_Z + 0.006 + i * 0.0135 });
+    // A round visible at the feed lips.
+    p.add('brass', cyl(0.0029, 0.0029, 0.0500, 10), { y: MAG_TOP_Y + 0.0055, z: MAG_Z - 0.004 });
     p.group.name = 'magazine';
     p.build();
     root.add(p.group);
@@ -353,13 +369,13 @@ export function buildM4(resolve) {
   root.add(nodes.eject);
 
   nodes.magSocket = new THREE.Object3D();
-  nodes.magSocket.position.set(0, MAG_TOP_Y - 0.090, -0.0125);
+  nodes.magSocket.position.set(0, MAG_TOP_Y - 0.095, MAG_Z);
   root.add(nodes.magSocket);
 
   // Where the hands grip: trigger hand on the pistol grip, support hand well
   // forward on the handguard, which is how a carbine is actually held.
   nodes.gripRear = new THREE.Object3D();
-  nodes.gripRear.position.set(0, -0.0870, 0.0545);
+  nodes.gripRear.position.set(0, -0.0850, 0.0660);
   nodes.gripRear.rotation.set(0.40, 0, 0);
   root.add(nodes.gripRear);
 

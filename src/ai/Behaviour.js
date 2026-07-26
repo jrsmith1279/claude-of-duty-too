@@ -301,6 +301,7 @@ const Flank = action('flank', {
   enter(b, ctx) {
     claimCover(b, pickCover(b, ctx, { flank: true, maxDist: 40, distWeight: 0.12 }));
     b.flankTimer = 6 + Math.random() * 4;
+    b.ai.flanker = b;
   },
   tick(b, dt, ctx) {
     b.flankTimer -= dt;
@@ -313,6 +314,7 @@ const Flank = action('flank', {
     if (b.position.distanceTo(_v) < 0.9) return SUCCESS;
     return RUNNING;
   },
+  exit(b) { if (b.ai.flanker === b) b.ai.flanker = null; b.combatTime = 0; },
 });
 
 /** Put rounds on the last known position to keep a head down. */
@@ -420,8 +422,12 @@ export function buildTree() {
       cond('contact', seesEnemy),
       selector('fight-how', [
         sequence('flank-stale', [
+          // Staggered per bot, and at most one flanker at a time: a whole
+          // squad breaking cover together looks scripted and dies together.
           cond('stalemate', (b, dt, ctx) =>
-            b.combatTime > 9 && b.sense.visible && b.position.distanceTo(b.sense.lastKnown) > 12),
+            b.combatTime > 7 + b.seed * 9 && b.sense.visible &&
+            b.position.distanceTo(b.sense.lastKnown) > 12 &&
+            (b.ai.flanker === b || !b.ai.flanker || !b.ai.flanker.alive)),
           Flank,
         ]),
         FightFromCover,

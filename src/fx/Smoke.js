@@ -155,6 +155,9 @@ export class Smoke {
    * of a column that has "already been burning" for `seconds`.
    */
   prime(emitter, seconds, steps = 26) {
+    // Never prime further back than the particle lifetime: those births are
+    // already expired and the column comes out half as dense as asked for.
+    seconds = Math.min(seconds, emitter.life * 0.72);
     const dt = seconds / steps;
     for (let i = steps; i > 0; i--) {
       emitter.age = seconds - i * dt;

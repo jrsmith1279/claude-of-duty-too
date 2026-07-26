@@ -367,6 +367,15 @@ export class Viewmodel {
     _qb.setFromEuler(_e);
     root.quaternion.copy(_qa).multiply(_qb);
 
+    // Authoring aid: `__COD__.ctx.engine.get('weapons').view.studio = {pos,rot}`
+    // parks the weapon at a fixed pose so the model can be judged on its own
+    // against clean sky instead of through a hip-fire frame. Never set in play.
+    if (this.studio) {
+      root.position.fromArray(this.studio.pos);
+      root.rotation.fromArray(this.studio.rot);
+      root.quaternion.setFromEuler(root.rotation);
+    }
+
     this._animateParts(dt);
     this._updateLights(dt);
     return stageFired;

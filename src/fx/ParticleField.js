@@ -224,10 +224,10 @@ ${lit ? `
   float forward = pow(clamp(ndl, 0.0, 1.0), 3.0);
   // Optical depth through the puff: thick centres are shadowed by their own
   // near side, thin edges glow. Without this a puff is a flat disc of one tone.
-  float selfShadow = mix(1.0, 0.22, clamp(tex.b * 1.15, 0.0, 1.0));
+  float selfShadow = mix(1.0, 0.45, clamp(tex.b, 0.0, 1.0));
   float upness = clamp(dot(n, uUpView) * 0.5 + 0.5, 0.0, 1.0);
   vec3 ambient = mix(uGround, uAmbient, upness);
-  col *= ambient + uSunColor * ((wrap * wrap * wrap * 1.15 + forward * 0.55) * selfShadow);
+  col *= ambient + uSunColor * ((wrap * wrap * 1.05 + forward * 0.55) * selfShadow);
 ` : `
   col *= mix(1.0, 1.0 + tex.b * 0.8, 0.6);
 `}

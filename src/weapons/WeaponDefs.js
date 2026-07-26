@@ -35,13 +35,15 @@ export const GUN_MATERIALS = {
   // Blued/oiled steel: slides, hammers. Smoother than parkerising and darker.
   blued: ['gun_metal', { uvScale: 5, roughness: 0.26, color: 0x4a5058, envMapIntensity: 0.62 }],
   // Injection-moulded furniture.
-  polymer: ['gun_polymer', { uvScale: 4, roughness: 0.56, color: 0x5f6266, envMapIntensity: 0.40 }],
+  // Deep recesses: slots, grooves, holes. Reads as a cut rather than a decal.
+  void: ['gun_polymer', { uvScale: 6, roughness: 0.94, color: 0x0d0e10, envMapIntensity: 0.06 }],
+  polymer: ['gun_polymer', { uvScale: 12, roughness: 0.56, color: 0x5f6266, envMapIntensity: 0.40 }],
   polymer_fde: ['gun_polymer', { uvScale: 7, roughness: 0.68, color: 0xa88a63, envMapIntensity: 0.55 }],
   // Rubberised butt pad and grip inserts.
-  rubber: ['rubber', { uvScale: 5, color: 0x8b8e92, envMapIntensity: 0.35 }],
+  rubber: ['rubber', { uvScale: 14, color: 0x8b8e92, envMapIntensity: 0.35 }],
   // Optic glass: not transmissive — the aperture is genuinely open geometry, so
   // this only ever covers the lens rim where the coating flares.
-  lens: ['steel_brushed', { uvScale: 3, roughness: 0.05, metalness: 1, color: 0x4f7cb4, envMapIntensity: 1.8 }],
+  lens: ['steel_brushed', { uvScale: 3, roughness: 0.06, metalness: 1, color: 0x35578a, envMapIntensity: 1.0 }],
   // The red dot itself. Emissive lands in the HDR viewmodel buffer before
   // bloom, so it flares the way a real illuminated reticle does. The scale is
   // set against a sunlit street metering at ~2 units, so it has to be an order

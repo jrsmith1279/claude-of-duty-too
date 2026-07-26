@@ -164,14 +164,14 @@ export class Impacts {
       s.drag = big ? 2.8 : 3.6;
       s.gravity = -0.7;
       s.size0 = big ? 0.07 * e : 0.035;
-      s.size1 = big ? rnd(0.42, 0.62) * e : rnd(0.16, 0.28);
+      s.size1 = big ? rnd(0.55, 0.85) * e : rnd(0.20, 0.34);
       s.tile = big ? PT.DUST : PT.SMOKE_A + ((Math.random() * 3) | 0);
       s.turb = 0.12;
       s.soft = 0.55;
       s.rot = Math.random() * 6.28; s.rotSpeed = rnd(-1.1, 1.1);
       s.r0 = def.dust[0]; s.g0 = def.dust[1]; s.b0 = def.dust[2];
       s.r1 = def.dust[0] * 0.88; s.g1 = def.dust[1] * 0.88; s.b1 = def.dust[2] * 0.9;
-      s.a0 = big ? 0.70 : 0.48; s.a1 = 0;
+      s.a0 = big ? 0.85 : 0.55; s.a1 = 0;
       s.fadeIn = 0.04; s.fadeOut = 0.55;
       lit.spawn(s);
     }
@@ -353,13 +353,13 @@ export class Impacts {
       s.drag = big ? 2.0 : 3.0;
       s.gravity = -0.55;
       s.size0 = big ? 0.09 * e : 0.045;
-      s.size1 = big ? rnd(0.60, 0.95) * e : rnd(0.24, 0.4);
+      s.size1 = big ? rnd(0.80, 1.20) * e : rnd(0.30, 0.5);
       s.tile = big ? PT.DUST : PT.SMOKE_C;
       s.turb = 0.20; s.soft = 0.6;
       s.rot = Math.random() * 6.28; s.rotSpeed = rnd(-0.9, 0.9);
       s.r0 = def.dust[0]; s.g0 = def.dust[1]; s.b0 = def.dust[2];
       s.r1 = def.dust[0] * 0.9; s.g1 = def.dust[1] * 0.9; s.b1 = def.dust[2] * 0.92;
-      s.a0 = big ? 0.60 : 0.40; s.a1 = 0;
+      s.a0 = big ? 0.78 : 0.52; s.a1 = 0;
       s.fadeIn = 0.06; s.fadeOut = 0.6;
       this.lit.spawn(s);
     }

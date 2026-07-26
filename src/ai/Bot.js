@@ -146,6 +146,8 @@ export class Bot {
     this.pathAge = 99;
     this.ragdoll = null;
     this.muzzleFlash = 0;
+    this.stuck = 0;
+    this.avoidDir = 0;
     this.velocity.set(0, 0, 0);
     for (const k in this.mem) delete this.mem[k];
     this.sense.reset();
@@ -349,6 +351,14 @@ export class Bot {
         if (d > 1e-4) this.desired.set((wx - this.position.x) / d, 0, (wz - this.position.z) / d);
       }
     }
+    if (this.avoidDir && want > 0) {
+      // Slide sideways along whatever is blocking us.
+      const a = this.avoidDir * 1.15;
+      const cx = Math.cos(a), sx = Math.sin(a);
+      const dx = this.desired.x, dz = this.desired.z;
+      this.desired.x = dx * cx + dz * sx;
+      this.desired.z = -dx * sx + dz * cx;
+    }
     this.desired.multiplyScalar(want);
 
     // Separation. Bots are not physics-solid against each other — a push-apart
@@ -374,21 +384,44 @@ export class Bot {
     this.velocity.y = -6;
 
     const phys = ctx.physics;
+    _v1.copy(this.position);
     if (phys?.moveCharacter && this.capsule) {
       const res = phys.moveCharacter(this.capsule, this.velocity, dt, MASK_WORLD);
       this.position.copy(this.capsule.position);
-      if (res) {
-        if (res.grounded) this.velocity.y = 0;
-        if (res.hitWall) {
-          // Repath around whatever we walked into rather than grinding on it.
-          if (this.pathAge > 0.5) this.pathAge = 99;
-        }
-      }
+      if (res?.grounded) this.velocity.y = 0;
     } else {
       this.position.addScaledVector(this.velocity, dt);
       this.position.y = this.ai.nav?.heightAt(this.position.x, this.position.z, this.position.y) ?? 0;
     }
+
+    // Adopt what actually happened as the velocity. Without this a bot walking
+    // into a wall keeps its intended 3.6 m/s for ever: the animator leans it
+    // into a sprint it is not doing, and the acceleration term never notices.
+    const inv = 1 / Math.max(dt, 1e-4);
+    this.velocity.x = (this.position.x - _v1.x) * inv;
+    this.velocity.z = (this.position.z - _v1.z) * inv;
     this.speed = Math.hypot(this.velocity.x, this.velocity.z);
+
+    // Unstick. The navmesh knows about the level, not about the props dropped
+    // on top of it, so a bot will occasionally path straight into a crate.
+    // Wall-follow for a moment, then give up on the goal entirely.
+    if (want > 0.6 && this.speed < want * 0.35) {
+      this.stuck += dt;
+      if (this.stuck > 0.45 && !this.avoidDir) this.avoidDir = this.rand() < 0.5 ? -1 : 1;
+      if (this.stuck > 2.6) {
+        this.stuck = 0;
+        this.avoidDir = 0;
+        this.pathAge = 99;
+        this.goal.set(9e9, 0, 9e9);
+        if (this.cover && this.ai.coverTaken.get(this.cover) === this) {
+          this.ai.coverTaken.delete(this.cover);
+        }
+        this.cover = null;
+      }
+    } else if (this.stuck > 0) {
+      this.stuck = Math.max(0, this.stuck - dt * 2.5);
+      if (this.stuck === 0) this.avoidDir = 0;
+    }
   }
 
   /** Body yaw: toward the threat when fighting, toward travel when not. */
