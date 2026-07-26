@@ -131,15 +131,14 @@ export class Viewmodel {
     s.add(this.key);
     s.add(this.key.target);
 
-    this.fill = new THREE.HemisphereLight(0x9fc4ff, 0x2a2622, 0.55);
+    // Ambient comes from the same PMREM probe the world uses (see
+    // `_updateLights`), so this is only a floor to keep the shadow side of the
+    // receiver from going to literal black. Its colour is taken from the sky
+    // but *normalised* — `sky.skyColor` is HDR radiance in `sky.exposure`
+    // units, and feeding those straight into a light blows the weapon out by
+    // more than a stop and stains it blue.
+    this.fill = new THREE.HemisphereLight(0x9fc4ff, 0x3a352c, 0.0);
     s.add(this.fill);
-
-    // A weak rim from behind-right stops the receiver merging into the world
-    // when the player faces into the sun.
-    this.rim = new THREE.DirectionalLight(0xbfd4ff, 0.35);
-    this.rim.position.set(0.7, 0.25, 0.9);
-    s.add(this.rim);
-    s.add(this.rim.target);
   }
 
   /** Build (or fetch) a weapon model and make it the active one. */
@@ -447,15 +446,19 @@ export class Viewmodel {
       if (_v.z > 0.55) _v.z = 0.55;
       this.key.position.copy(_v).multiplyScalar(6);
     }
+    // Match the world's key exactly. Anything else and the weapon is exposed
+    // differently from the street it is standing in, which is instantly
+    // legible even when you cannot say why.
     if (sun) {
       this.key.color.copy(sun.color);
-      this.key.intensity = Math.max(0.25, sun.intensity * 0.62);
+      this.key.intensity = sun.intensity;
     }
     if (sky?.skyColor) {
-      this.fill.color.copy(sky.skyColor);
-      this.fill.intensity = 0.35 + 0.55 * (sky.intensity ?? 1);
-      this.rim.color.copy(sky.skyColor);
-      this.rim.intensity = 0.18 + 0.30 * (sky.intensity ?? 1);
+      const c = this.fill.color.copy(sky.skyColor);
+      const peak = Math.max(c.r, c.g, c.b, 1e-4);
+      c.multiplyScalar(1 / peak);
+      this.fill.groundColor.setRGB(c.r * 0.30, c.g * 0.28, c.b * 0.22);
+      this.fill.intensity = Math.max(0.05, (sun?.intensity ?? 1) * 0.05);
     }
 
     const env = ctx.scene?.environment || null;
@@ -464,7 +467,7 @@ export class Viewmodel {
     if (env) {
       _e.setFromQuaternion(_q, 'XYZ');
       vs.environmentRotation.set(_e.x, _e.y, _e.z, 'XYZ');
-      vs.environmentIntensity = 0.85;
+      vs.environmentIntensity = 1.0;
     }
   }
 

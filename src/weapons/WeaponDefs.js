@@ -180,10 +180,15 @@ const RELOAD_PISTOL = {
  * eye-relief distance is a number here.
  */
 const POSE_RIFLE = {
-  hip: { pos: [0.108, -0.101, -0.255], rot: [1.1, -6.2, 2.4] },
-  adsEyeRelief: 0.205,
-  sprint: { pos: [0.075, -0.128, -0.205], rot: [-6.0, 26.0, -33.0] },
-  lowReady: { pos: [0.105, -0.150, -0.240], rot: [-24.0, -8.0, 3.0] },
+  hip: { pos: [0.126, -0.137, -0.315], rot: [1.0, -5.6, 2.6] },
+  // 0.30 m is long for a red dot in real life, but it is deliberate: the
+  // viewmodel composite focuses its little depth-of-field at 0.32 m, so
+  // putting the sight there keeps the reticle razor sharp while the muzzle and
+  // the rear of the receiver fall off — exactly the ADS look that pass exists
+  // to produce.
+  adsEyeRelief: 0.300,
+  sprint: { pos: [0.092, -0.164, -0.265], rot: [-6.0, 26.0, -33.0] },
+  lowReady: { pos: [0.122, -0.190, -0.300], rot: [-24.0, -8.0, 3.0] },
 };
 
 export const WEAPONS = {
@@ -196,7 +201,7 @@ export const WEAPONS = {
     kick: { back: 0.0165, rise: 2.7, roll: 1.1, freq: 15.5, zeta: 0.42 },
     bolt: { travel: 0.030, time: 0.055 },
     shell: { size: 0.0056, len: 0.045, speed: 3.6 },
-    reload: RELOAD_M4, pose: POSE_RIFLE, viewFov: [62, 48],
+    reload: RELOAD_M4, pose: POSE_RIFLE, viewFov: [65, 44],
     sound: { fire: 'm4_fire', reload: 'rifle_reload' },
   },
   ak74: {
@@ -208,7 +213,7 @@ export const WEAPONS = {
     kick: { back: 0.0205, rise: 3.4, roll: 1.5, freq: 14.0, zeta: 0.40 },
     bolt: { travel: 0.034, time: 0.062 },
     shell: { size: 0.0056, len: 0.040, speed: 4.1 },
-    reload: RELOAD_M4, pose: POSE_RIFLE, viewFov: [62, 48],
+    reload: RELOAD_M4, pose: POSE_RIFLE, viewFov: [65, 44],
     sound: { fire: 'ak_fire', reload: 'rifle_reload' },
   },
   mp5: {
@@ -220,7 +225,7 @@ export const WEAPONS = {
     kick: { back: 0.0128, rise: 2.1, roll: 0.9, freq: 17.5, zeta: 0.45 },
     bolt: { travel: 0.026, time: 0.046 },
     shell: { size: 0.0048, len: 0.019, speed: 3.2 },
-    reload: RELOAD_MP5, pose: POSE_RIFLE, viewFov: [62, 48],
+    reload: RELOAD_MP5, pose: POSE_RIFLE, viewFov: [65, 44],
     sound: { fire: 'mp5_fire', reload: 'smg_reload' },
   },
   m870: {
@@ -232,7 +237,7 @@ export const WEAPONS = {
     kick: { back: 0.040, rise: 6.4, roll: 2.4, freq: 10.0, zeta: 0.46 },
     bolt: { travel: 0.085, time: 0.22 },
     shell: { size: 0.0092, len: 0.060, speed: 2.4 },
-    reload: RELOAD_M4, pose: POSE_RIFLE, viewFov: [62, 50],
+    reload: RELOAD_M4, pose: POSE_RIFLE, viewFov: [65, 46],
     sound: { fire: 'shotgun_fire', reload: 'shell_insert' },
   },
   dmr: {
@@ -244,7 +249,7 @@ export const WEAPONS = {
     kick: { back: 0.026, rise: 4.2, roll: 1.4, freq: 12.5, zeta: 0.44 },
     bolt: { travel: 0.030, time: 0.070 },
     shell: { size: 0.0078, len: 0.051, speed: 4.4 },
-    reload: RELOAD_M4, pose: POSE_RIFLE, viewFov: [62, 42],
+    reload: RELOAD_M4, pose: POSE_RIFLE, viewFov: [65, 38],
     sound: { fire: 'dmr_fire', reload: 'rifle_reload' },
   },
   deagle: {
@@ -258,12 +263,12 @@ export const WEAPONS = {
     shell: { size: 0.0064, len: 0.033, speed: 3.0 },
     reload: RELOAD_PISTOL,
     pose: {
-      hip: { pos: [0.098, -0.108, -0.230], rot: [2.0, -7.5, 3.0] },
-      adsEyeRelief: 0.290,
-      sprint: { pos: [0.070, -0.132, -0.190], rot: [-8.0, 30.0, -36.0] },
-      lowReady: { pos: [0.095, -0.155, -0.215], rot: [-26.0, -9.0, 3.0] },
+      hip: { pos: [0.115, -0.148, -0.285], rot: [2.0, -7.5, 3.0] },
+      adsEyeRelief: 0.305,
+      sprint: { pos: [0.088, -0.172, -0.245], rot: [-8.0, 30.0, -36.0] },
+      lowReady: { pos: [0.112, -0.196, -0.270], rot: [-26.0, -9.0, 3.0] },
     },
-    viewFov: [62, 52],
+    viewFov: [65, 48],
     sound: { fire: 'deagle_fire', reload: 'pistol_reload' },
   },
 };
