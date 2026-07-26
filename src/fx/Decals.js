@@ -37,16 +37,18 @@ const _p = new THREE.Vector3();
 const _origin = new THREE.Vector3();
 const _scale = new THREE.Vector3();
 const _basis = new THREE.Matrix4();
+const _drift = new THREE.Vector3();
+const _fitPoint = new THREE.Vector3();
 
 export const DECAL_KINDS = {
-  bullet_concrete: { tiles: [DT.HOLE_CONCRETE_A, DT.HOLE_CONCRETE_B], tint: [1, 0.99, 0.96], size: 0.22, life: 90 },
+  bullet_concrete: { tiles: [DT.HOLE_CONCRETE_A, DT.HOLE_CONCRETE_B], tint: [0.98, 0.97, 0.95], size: 0.18, life: 90 },
   bullet_plaster: { tiles: [DT.HOLE_CONCRETE_A, DT.HOLE_CONCRETE_B], tint: [1.02, 1, 0.95], size: 0.24, life: 90 },
   bullet_brick: { tiles: [DT.HOLE_CONCRETE_B, DT.HOLE_CONCRETE_A], tint: [1.02, 0.94, 0.88], size: 0.2, life: 90 },
   bullet_metal: { tiles: [DT.HOLE_METAL], tint: [1, 1, 1.02], size: 0.14, life: 90 },
   bullet_wood: { tiles: [DT.HOLE_WOOD], tint: [1, 0.96, 0.9], size: 0.18, life: 90 },
   bullet_glass: { tiles: [DT.CRACK_GLASS], tint: [1, 1, 1], size: 0.3, life: 90 },
   bullet_sand: { tiles: [DT.DIVOT_SAND], tint: [1.04, 1, 0.9], size: 0.26, life: 45 },
-  spall: { tiles: [DT.SPALL_CLUSTER], tint: [1, 0.99, 0.96], size: 0.7, life: 90 },
+  spall: { tiles: [DT.SPALL_CLUSTER], tint: [0.98, 0.97, 0.95], size: 0.6, life: 90 },
   scorch: { tiles: [DT.SCORCH], tint: [1, 0.97, 0.93], size: 2.6, life: 120 },
   blood: { tiles: [DT.BLOOD_A, DT.BLOOD_B], tint: [0.34, 0.055, 0.05], size: 0.42, life: 40 },
   scuff: { tiles: [DT.SCUFF], tint: [1, 0.99, 0.97], size: 0.9, life: 60 },
@@ -171,9 +173,12 @@ export class Decals {
     if (_n.lengthSq() < 1e-8) _n.set(0, 1, 0);
     _n.normalize();
 
+    // Copy: `_fit` nudges the centre to keep the quad on the surface, and the
+    // caller's vector is very often a pooled physics hit that must not move.
+    _fitPoint.set(point.x, point.y, point.z);
     let s = size || def.size;
     s *= 0.85 + 0.3 * Math.random();
-    s = this._fit(point, _n, s);
+    s = this._fit(_fitPoint, _n, s);
 
     // Orthonormal basis with a random roll so repeated hits never tile.
     _t.copy(Math.abs(_n.y) > 0.94 ? ALT : UP).cross(_n).normalize();
@@ -187,7 +192,7 @@ export class Decals {
     _basis.makeBasis(_t, _b, _n);
     _q.setFromRotationMatrix(_basis);
 
-    _origin.set(point.x, point.y, point.z).addScaledVector(_n, 0.012 + s * 0.01);
+    _origin.copy(_fitPoint).addScaledVector(_n, 0.012 + s * 0.012);
     _scale.set(s, s, s);
     _m.compose(_origin, _q, _scale);
 
@@ -214,31 +219,51 @@ export class Decals {
   }
 
   /**
-   * Shrinks the decal until its corners are backed by geometry, so a hole
-   * placed near a corner does not hang in the air. Two tries, then give up and
-   * take the small one.
+   * Fits the decal to the surface it landed on.
+   *
+   * A flat quad projected onto a wall will hang off the corner of that wall
+   * into open air, which is the single most obvious decal artefact there is.
+   * This walks eight points around the rim, casts each one back at the surface,
+   * and both shrinks the quad *and* nudges its centre away from whichever side
+   * is unsupported until it fits or gets too small to matter.
+   *
+   * The rim samples are radial, not the quad's own corners, so the result does
+   * not depend on the random roll applied afterwards.
    */
   _fit(point, normal, size) {
     const phys = this.ctx.physics;
     if (!phys?.raycast) return size;
+    _t.copy(Math.abs(normal.y) > 0.94 ? ALT : UP).cross(normal).normalize();
+    _b.copy(normal).cross(_t).normalize();
+
     let s = size;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      _t.copy(Math.abs(normal.y) > 0.94 ? ALT : UP).cross(normal).normalize();
-      _b.copy(normal).cross(_t).normalize();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const r = s * 0.46;
       let missed = 0;
-      const r = s * 0.42;
-      for (let k = 0; k < 4; k++) {
-        const dx = k < 2 ? (k === 0 ? r : -r) : 0;
-        const dz = k < 2 ? 0 : (k === 2 ? r : -r);
+      _drift.set(0, 0, 0);
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * Math.PI * 2;
+        const dx = Math.cos(a) * r;
+        const dz = Math.sin(a) * r;
         _p.set(point.x, point.y, point.z)
           .addScaledVector(_t, dx)
           .addScaledVector(_b, dz)
-          .addScaledVector(normal, 0.09);
+          .addScaledVector(normal, 0.12);
         _origin.copy(normal).multiplyScalar(-1);
-        if (!phys.raycast(_p, _origin, 0.2, 1 | 2)) missed++;
+        const hit = phys.raycast(_p, _origin, 0.26, 1 | 2);
+        if (!hit || hit.normal.dot(normal) < 0.65) {
+          missed++;
+          // Pull away from the unsupported side.
+          _drift.addScaledVector(_t, -dx).addScaledVector(_b, -dz);
+        }
       }
       if (missed === 0) return s;
-      s *= 0.5;
+      if (missed < 4) {
+        _drift.multiplyScalar(0.55 / missed);
+        point.x += _drift.x; point.y += _drift.y; point.z += _drift.z;
+      }
+      s *= 0.55;
+      if (s < 0.05) return s;
     }
     return s;
   }

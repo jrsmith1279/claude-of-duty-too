@@ -56,7 +56,7 @@ const ROLL_PULL = 0.07;
 // stands with soft knees anyway.
 const STANCE = {
   stand: { hip: 0.905, lean: 0.02, width: 1.00, eye: 1.630 },
-  crouch: { hip: 0.695, lean: 0.18, width: 1.08, eye: 1.235 },
+  crouch: { hip: 0.645, lean: 0.24, width: 1.06, eye: 1.185 },
 };
 
 const UP = new THREE.Vector3(0, 1, 0);

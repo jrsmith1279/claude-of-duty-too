@@ -227,11 +227,11 @@ vec4 dBulletConcrete(vec2 c, float seed){
   float halo = exp(-r * 4.4) * (0.35 + 0.75 * fxFbm(c * 4.0 + 11.0, 4)) * 0.45;
 
   float v = 0.5;
-  v = mix(v, 1.00, fxSat(spall * 1.15));
+  v = mix(v, 0.73, fxSat(spall * 1.0));
   v = mix(v, 0.34, fxSat(halo * 0.6));
   v = mix(v, 0.30, fxSat(crack * 0.7));
   v = mix(v, 0.030, hole);
-  float cov = fxSat(hole + spall * 1.05 + halo * 0.6 + crack * 0.45);
+  float cov = fxSat(hole + spall * 0.85 + halo * 0.5 + crack * 0.45);
   return vec4(vec3(v * 1.0, v * 0.99, v * 0.97), cov * smoothstep(1.0, 0.80, r));
 }
 

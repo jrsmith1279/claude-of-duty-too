@@ -506,17 +506,24 @@ export class FXSystem {
 
     // Scars: this wall has been shot at for a while, not just now.
     if (A.hit) {
-      for (let i = 0; i < 9; i++) {
-        _v2.set(0, 1, 0).cross(A.normal);
-        if (_v2.lengthSq() < 1e-6) _v2.set(1, 0, 0);
-        _v2.normalize();
-        _p.copy(A.normal).cross(_v2).normalize();
-        _v.copy(A.point)
-          .addScaledVector(_v2, (Math.random() - 0.5) * 1.7)
-          .addScaledVector(_p, (Math.random() - 0.5) * 1.3);
-        this.decals.add(_v, A.normal, 'bullet_concrete', 0.16 + Math.random() * 0.14, 1);
+      _v2.set(0, 1, 0).cross(A.normal);
+      if (_v2.lengthSq() < 1e-6) _v2.set(1, 0, 0);
+      _v2.normalize();
+      _v3.copy(A.normal).cross(_v2).normalize();
+      for (let i = 0; i < 7; i++) {
+        // Cast each scar back at the surface rather than trusting the jitter:
+        // an offset from the hit point is very often past the edge of the thing
+        // that was hit, and a decal hanging in mid-air is unmissable.
+        _p.copy(A.point)
+          .addScaledVector(_v2, (Math.random() - 0.5) * 1.5)
+          .addScaledVector(_v3, (Math.random() - 0.5) * 1.0)
+          .addScaledVector(A.normal, 0.5);
+        _v.copy(A.normal).multiplyScalar(-1);
+        const sc = ctx.physics?.raycast?.(_p, _v, 1.1, 1 | 2);
+        if (!sc || sc.normal.dot(A.normal) < 0.7) continue;
+        this.decals.add(sc.point, sc.normal, 'bullet_concrete', 0.13 + Math.random() * 0.10, 0.9);
       }
-      this.decals.add(A.point, A.normal, 'spall', 1.1, 0.7);
+      this.decals.add(A.point, A.normal, 'spall', 0.7, 0.5);
     }
 
     // Two fresh impacts at different ages so the dust has structure.

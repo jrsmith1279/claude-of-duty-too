@@ -614,6 +614,13 @@ export class Bot {
     this._bonePos('footL', t.legL);
     this._bonePos('footR', t.legR);
 
+    // Tuck the rifle against the chest for the fall. The weapon bone is driven
+    // by the animator, which stops running the moment the bot dies, so without
+    // this a corpse keeps its last aim pose and the barrel ends up pointing at
+    // the sky.
+    const w = this.rig.byName.get('weapon');
+    if (w) { w.position.set(0.115, -0.150, 0.150); w.quaternion.set(0, 0, 0, 1); }
+
     const impulse = this.ai.ragdollImpulse;
     impulse.copy(dirWorld || UP).setY(0);
     if (impulse.lengthSq() < 1e-6) impulse.set(0, 0, 1);

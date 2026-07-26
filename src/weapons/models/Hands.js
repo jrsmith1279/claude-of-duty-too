@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Part, chamferBox, cyl, capsuleZ, sphere, prep } from '../GunKit.js';
+import { Part, chamferBox, cyl, sphere, prep } from '../GunKit.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 /**
@@ -65,48 +65,69 @@ function finger(base, dirX, dirY, dirZ, curl, axisX, axisY, axisZ, len = 0.056, 
   return mergeGeometries(parts, false);
 }
 
-/** Trigger hand: wraps the pistol grip, index finger on the trigger. */
-function buildTriggerHand(p, trigger) {
-  // Palm, on the shooter's side of the grip.
-  p.add('glove', chamferBox(0.0250, 0.0780, 0.0470, { r: 0.0110, bevel: 0.0025, curveSegments: 3 }), { x: 0.0215, y: -0.0085, z: 0.0055, rz: -0.06 });
-  // Heel of the hand, thicker at the base.
-  p.add('glove', chamferBox(0.0240, 0.0260, 0.0430, { r: 0.0110, bevel: 0.0025 }), { x: 0.0230, y: -0.0400, z: 0.0140, rx: -0.12 });
-  // Padded back-of-hand panel — the one piece of a tactical glove that is not
-  // fabric, and the thing that makes it read as a glove rather than a mitten.
-  p.add('glove_pad', chamferBox(0.0050, 0.0480, 0.0320, { r: 0.0060, bevel: 0.0014 }), { x: 0.0340, y: -0.0060, z: 0.0080, rz: -0.06 });
+/**
+ * Trigger hand: wraps the pistol grip, index finger on the trigger.
+ *
+ * Proportions are the whole game here. The first pass had a palm the size of
+ * the grip and a forearm cone hanging 15 cm below it, which read as a bag of
+ * shapes tied to the gun. A hand *in contact* is small, tight to the surface,
+ * and stops at the cuff — anything past the wrist is off the bottom of the
+ * frame in a real first-person shot anyway.
+ */
+function buildTriggerHand(p) {
+  // Palm, clamped against the right flank of the grip.
+  p.add('glove', chamferBox(0.0215, 0.0620, 0.0400, { r: 0.0085, bevel: 0.0022, curveSegments: 3 }), { x: 0.0195, y: -0.0080, z: 0.0030, rz: -0.05 });
+  // Heel of the hand.
+  p.add('glove', chamferBox(0.0205, 0.0230, 0.0330, { r: 0.0085, bevel: 0.0022 }), { x: 0.0200, y: -0.0330, z: 0.0135, rx: -0.16 });
+  // Padded back-of-hand panel — the one part of a tactical glove that is not
+  // fabric, and what makes it read as a glove rather than a mitten.
+  p.add('glove_pad', chamferBox(0.0042, 0.0390, 0.0270, { r: 0.0050, bevel: 0.0012 }), { x: 0.0300, y: -0.0070, z: 0.0050, rz: -0.05 });
 
-  // Three curled fingers round the front of the grip.
+  // Three fingers curled hard round the front of the grip.
+  // The curl axis is +Y, not +X: a finger closing round a grip sweeps through
+  // the horizontal plane from pointing forward to pointing back at the palm.
+  // Curling about X instead lifts the fingertips into the air, which is what
+  // made the first pass read as a cluster of sausages behind the weapon.
   for (let i = 0; i < 3; i++) {
-    const y = -0.0010 - i * 0.0185;
-    p.add('glove', finger([0.0175, y, -0.0130], -0.10, -0.12, -1.0, 2.3, 1, 0, 0, 0.052 - i * 0.004, 0.0082 - i * 0.0006), {});
+    const y = -0.0060 - i * 0.0170;
+    p.add('glove', finger([0.0125, y, -0.0140], -0.22, -0.10, -0.97, 2.5, 0, 1, 0, 0.046 - i * 0.004, 0.0076 - i * 0.0005), {});
+    // Knuckle over the top of each finger root.
+    p.add('glove', sphere(0.0080 - i * 0.0005, 8), { x: 0.0135, y: y + 0.0035, z: -0.0130 });
   }
   // Index finger, straighter, reaching the trigger.
-  p.add('glove', finger([0.0170, 0.0195, -0.0120], -0.16, -0.05, -1.0, 1.15, 1, 0, 0, 0.055, 0.0086), {});
-  // Thumb round the back of the grip.
-  p.add('glove', finger([0.0195, 0.0210, 0.0180], -0.55, -0.30, -0.78, 0.85, 0.4, -0.5, 0.6, 0.048, 0.0098), {});
+  p.add('glove', finger([0.0125, 0.0175, -0.0130], -0.20, -0.09, -0.98, 1.20, 0, 1, 0, 0.050, 0.0080), {});
+  p.add('glove', sphere(0.0084, 8), { x: 0.0135, y: 0.0210, z: -0.0120 });
+  // Thumb laid across the back of the grip and down.
+  p.add('glove', finger([0.0170, 0.0150, 0.0165], -0.50, -0.60, -0.62, 0.55, 0.3, -0.4, 0.7, 0.044, 0.0090), {});
 
-  // Wrist and cuff running down out of frame.
-  p.add('glove', cyl(0.0230, 0.0265, 0.0420, 12), { x: 0.0270, y: -0.0620, z: 0.0300, rx: 1.20 });
-  p.add('sleeve', cyl(0.0290, 0.0310, 0.0460, 12), { x: 0.0320, y: -0.0910, z: 0.0430, rx: 1.20 });
-  p.add('glove_pad', ring(0.0288, 0.0034, 12, 5), { x: 0.0292, y: -0.0740, z: 0.0357, rx: 1.20 });
+  // Cuff. Short on purpose: the forearm is out of frame, and a long tapered
+  // tube hanging into shot is worse than no forearm at all.
+  p.add('glove', cyl(0.0200, 0.0225, 0.0300, 12), { x: 0.0225, y: -0.0480, z: 0.0215, rx: 1.18 });
+  p.add('sleeve', cyl(0.0245, 0.0255, 0.0300, 12), { x: 0.0250, y: -0.0625, z: 0.0300, rx: 1.18 });
+  p.add('glove_pad', ring(0.0233, 0.0030, 12, 5), { x: 0.0238, y: -0.0552, z: 0.0258, rx: 1.18 });
 }
 
 /** Support hand: C-clamp on the handguard, thumb forward along the top. */
 function buildSupportHand(p, radius) {
   const R = radius;
-  // Palm pressed against the left flank of the handguard.
-  p.add('glove', chamferBox(0.0230, 0.0520, 0.0800, { r: 0.0100, bevel: 0.0025, curveSegments: 3 }), { x: -(R + 0.0130), y: -0.0090, z: 0.0000, rz: 0.10 });
-  p.add('glove_pad', chamferBox(0.0048, 0.0380, 0.0620, { r: 0.0070, bevel: 0.0014 }), { x: -(R + 0.0250), y: -0.0060, z: 0.0000, rz: 0.10 });
-  // Four fingers reaching over the top of the handguard.
+  // Palm pressed against the left flank of the handguard, wrapped under it.
+  p.add('glove', chamferBox(0.0185, 0.0420, 0.0600, { r: 0.0125, bevel: 0.0022, curveSegments: 3 }), { x: -(R + 0.0095), y: -0.0080, z: 0.0000, rz: 0.12 });
+  p.add('glove', chamferBox(0.0300, 0.0170, 0.0560, { r: 0.0080, bevel: 0.0020 }), { x: -(R * 0.55), y: -(R + 0.0055), z: 0.0020, rz: 0.20 });
+  p.add('glove_pad', chamferBox(0.0038, 0.0290, 0.0470, { r: 0.0075, bevel: 0.0012 }), { x: -(R + 0.0182), y: -0.0060, z: 0.0000, rz: 0.12 });
+  // Knuckle row along the top edge — the read that separates a hand from a box.
   for (let i = 0; i < 4; i++) {
-    const z = -0.0270 + i * 0.0180;
-    p.add('glove', finger([-(R + 0.0075), -0.0230 + i * 0.0010, z], 0.30, 0.95, 0.0, 2.5, 0, 0, -1, 0.050 - i * 0.003, 0.0082 - i * 0.0005), {});
+    p.add('glove', sphere(0.0082 - i * 0.0005, 8), { x: -(R + 0.0075), y: 0.0075, z: -0.0250 + i * 0.0168 });
   }
-  // Thumb laid forward along the top-left rail, the modern C-clamp grip.
-  p.add('glove', finger([-(R + 0.0055), 0.0130, 0.0180], 0.22, 0.16, -0.96, 0.35, 1, 0, 0, 0.058, 0.0098), {});
-  // Wrist dropping away below-left.
-  p.add('glove', cyl(0.0225, 0.0260, 0.0400, 12), { x: -(R + 0.0230), y: -0.0420, z: 0.0250, rx: 1.05, rz: 0.30 });
-  p.add('sleeve', cyl(0.0285, 0.0305, 0.0480, 12), { x: -(R + 0.0330), y: -0.0680, z: 0.0410, rx: 1.05, rz: 0.30 });
+  // Four fingers reaching up over the top of the handguard.
+  for (let i = 0; i < 4; i++) {
+    const z = -0.0250 + i * 0.0168;
+    p.add('glove', finger([-(R + 0.0055), -0.0180 + i * 0.0008, z], 0.42, 0.90, 0.0, 2.6, 0, 0, -1, 0.044 - i * 0.003, 0.0074 - i * 0.0005), {});
+  }
+  // Thumb laid forward along the top-left rail — the modern C-clamp grip.
+  p.add('glove', finger([-(R + 0.0045), 0.0105, 0.0165], 0.26, 0.20, -0.94, 0.30, 1, 0, 0, 0.050, 0.0088), {});
+  // Short cuff dropping away below-left.
+  p.add('glove', cyl(0.0195, 0.0220, 0.0280, 12), { x: -(R + 0.0175), y: -0.0350, z: 0.0195, rx: 1.02, rz: 0.32 });
+  p.add('sleeve', cyl(0.0240, 0.0250, 0.0300, 12), { x: -(R + 0.0245), y: -0.0510, z: 0.0300, rx: 1.02, rz: 0.32 });
 }
 
 function ring(radius, thickness, seg, tubeSeg) {
@@ -119,7 +140,7 @@ function ring(radius, thickness, seg, tubeSeg) {
  */
 export function buildHands(resolve, opts = {}) {
   const rearPart = new Part('handRear', resolve);
-  buildTriggerHand(rearPart, opts.trigger);
+  buildTriggerHand(rearPart);
   const rear = rearPart.build();
 
   const frontPart = new Part('handFront', resolve);

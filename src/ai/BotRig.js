@@ -299,7 +299,7 @@ function buildBody() {
   const spineSkin = (x, y) => blendSpine(y);
 
   // Pelvis + hips.
-  b.add(rbox(0.300, 0.230, 0.215, 0.05), at(0, 0.985, 0.005), C.fatigue, spineSkin);
+  b.add(rbox(0.284, 0.230, 0.208, 0.05), at(0, 0.985, 0.005), C.fatigue, spineSkin);
   // Belt.
   b.add(rbox(0.312, 0.062, 0.228, 0.02), at(0, 0.905, 0.005), C.strap, rigid('hips'));
   // Torso: waist to chest, wider and deeper at the top.
@@ -355,7 +355,7 @@ function buildGear() {
   // the torso. This is most of the upper-body silhouette.
   b.add(rbox(0.330, 0.330, 0.075, 0.030), at(0, 1.288, 0.118), C.carrier, rigid('chest'), 2.2);
   b.add(rbox(0.330, 0.350, 0.070, 0.030), at(0, 1.288, -0.112), C.carrier, rigid('chest'), 2.2);
-  b.add(rbox(0.352, 0.190, 0.245, 0.035), at(0, 1.180, 0.004), C.carrier, rigid('spine'), 2.2);
+  b.add(rbox(0.328, 0.185, 0.238, 0.035), at(0, 1.180, 0.004), C.carrier, rigid('spine'), 2.2);
   // Shoulder straps.
   for (const s of [-1, 1]) {
     b.add(rbox(0.078, 0.062, 0.250, 0.020), at(s * 0.108, 1.432, 0.010), C.strap, rigid('chest'), 2.2);
