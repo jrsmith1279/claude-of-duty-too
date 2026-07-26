@@ -74,6 +74,12 @@ const FOG_PARS_FRAGMENT = /* glsl */ `
     return 0.07957747 * (1.0 - g2) / (d * sqrt(max(d, 1e-4)));
   }
 
+  /** Horizontal component of a direction, normalised, zero-safe. */
+  vec2 apFlatDir(vec3 d){
+    vec2 h = vec2(d.x, d.z);
+    return h / max(length(h), 1e-4);
+  }
+
   /** Analytic integral of rho0 * exp(-k * (y - yref)) along the view segment. */
   float apOpticalDepth(float y0, float y1, float dist, float rho0, float k, float yref){
     float dy = y1 - y0;
@@ -101,7 +107,25 @@ const FOG_FRAGMENT = /* glsl */ `
     // the same sheet of white and kills the depth cue the haze exists to give.
     vec3 apSky = mix( apParams[3].xyz, apParams[4].xyz, smoothstep( 0.0, 0.62, apDirW.y ) );
     apSky *= mix( apParams[4].w, 1.0, smoothstep( -0.30, 0.015, apDirW.y ) );
-    vec3 apIn = apSky + apParams[2].xyz * apPhase;
+    // Azimuthal warm/cool swing. Real haze is warm cream toward the sun and
+    // cool mauve away from it across the entire width of the frame; a narrow
+    // Henyey-Greenstein lobe is a few degrees wide and cannot produce that, so
+    // without this term the haze is one flat colour everywhere the lobe is not.
+    // +/-8% over a 120 degree arc, no new uniforms — apParams[1].xyz is the sun.
+    // normalize() of a zero vector is NaN, and both of these go to zero on the
+    // vertical (a fragment straight underfoot, a sun at the zenith), so the
+    // epsilon is load-bearing rather than defensive.
+    float apAz = dot( apFlatDir( apDirW ), apFlatDir( apParams[1].xyz ) );
+    apSky *= mix( vec3( 0.94, 0.96, 1.03 ), vec3( 1.10, 1.03, 0.92 ),
+                  smoothstep( -0.25, 0.85, apAz ) );
+    // The inscatter term was unbounded. The normalised HG peak at g = 0.62 is
+    // 11.3x, so within ~20 degrees of a low sun the haze rendered brighter than
+    // the sky it is supposed to be dissolving into — that is the "far end of
+    // the street blows to white" defect that survived two previous passes.
+    // Real air only exceeds sky radiance inside the ~5 degree solar aureole,
+    // so cap the additive term at 1.25x the local sky: 2.25x total, which is
+    // about the true aureole ratio. One min() on a vec3.
+    vec3 apIn = apSky + min( apParams[2].xyz * apPhase, apSky * 1.25 );
     gl_FragColor.rgb = gl_FragColor.rgb * (1.0 - apF) + apIn * apF;
   } else {
     #ifdef FOG_EXP2
