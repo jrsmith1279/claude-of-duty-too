@@ -130,6 +130,18 @@ export class Compass {
     c.textAlign = 'center';
     c.textBaseline = 'alphabetic';
 
+    // Half-step hairlines between the labelled marks. 15 degrees alone across a
+    // 90-degree window is seven marks over 860 px, which reads as a bare rule
+    // with a couple of specks on it rather than as a graduated ribbon.
+    const firstHalf = Math.ceil((heading - SPAN_DEG * 0.5) / 7.5) * 7.5;
+    for (let d = firstHalf; d <= heading + SPAN_DEG * 0.5; d += 7.5) {
+      if (Math.abs(d % 15) < 0.01) continue;
+      const off = (d - heading) * pxPerDeg;
+      const fade = 1 - Math.pow(Math.abs(off) / halfW, 2.2);
+      if (fade <= 0.02) continue;
+      this._tick(c, cx + off, y + 15 * k, 2.2 * k, k, 0.24 * fade * a);
+    }
+
     // Ticks every 15 degrees across the visible window.
     const first = Math.ceil((heading - SPAN_DEG * 0.5) / 15) * 15;
     for (let d = first; d <= heading + SPAN_DEG * 0.5; d += 15) {
