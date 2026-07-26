@@ -734,10 +734,40 @@ export function wallDecals(ctx, site, soft, hard, kit, rand, density = 1) {
 }
 
 /**
+ * A ring of settled dust and grime where a prop meets the ground.
+ *
+ * The cheapest possible fix for the "dropped in, not standing there" read: an
+ * object with a clean hard edge against the floor looks composited, and a
+ * contact shadow alone does not sell it because the shadow moves with the sun
+ * and the dirt does not.
+ */
+/**
  * Scorch and spill under the hero props. A burnt-out vehicle with clean tarmac
  * beneath it is the single most obvious tell that a prop was dropped into a
  * scene rather than having happened in it.
  */
+export function groundingDust(ctx, site, soft, kit, rand, colliders) {
+  if (!kit.texture || !colliders?.length) return { count: 0 };
+  let count = 0;
+  for (const c of colliders) {
+    const r = Math.max(c.w, c.d) * 0.5;
+    for (let i = 0, n = 1 + ((rand() * 2) | 0); i < n; i++) {
+      const a = rand() * 6.2832;
+      const d = r * (0.2 + rand() * 0.5);
+      const x = c.x + Math.cos(a) * d, z = c.z + Math.sin(a) * d;
+      const y = site.groundAt(x, z);
+      if (y === null) continue;
+      const geo = kit.geo(rand() < 0.65 ? 'dust' : 'grimeBand', rand);
+      if (!geo) continue;
+      const w = r * (1.6 + rand() * 1.1);
+      onGround(soft, 'gun_polymer', geo, x, y, z, w, w * (0.7 + rand() * 0.5),
+        rand() * 6.2832, tint(rand, 0.12, 0.06));
+      count++;
+    }
+  }
+  return { count };
+}
+
 export function hotspotDecals(ctx, site, soft, hard, kit, rand, hotspots) {
   if (!kit.texture || !hotspots?.length) return { count: 0 };
   let count = 0;

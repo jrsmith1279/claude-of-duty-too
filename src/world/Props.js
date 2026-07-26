@@ -2,7 +2,9 @@ import * as THREE from 'three';
 import { makeRng, Batch } from './props/lib.js';
 import { Site, BatchSet } from './props/layout.js';
 import { scatterGround, rubblePiles, wallDrifts, wallBerms } from './props/clutter.js';
-import { DecalKit, groundDecals, wallDecals, tyreTracks, hotspotDecals } from './props/decals.js';
+import {
+  DecalKit, groundDecals, wallDecals, tyreTracks, hotspotDecals, groundingDust,
+} from './props/decals.js';
 import { facadeDetail } from './props/facade.js';
 import { overheadLines, awnings, rooftops, fireEscape } from './props/overhead.js';
 import { streetFurniture } from './props/furniture.js';
@@ -127,6 +129,7 @@ export class PropSystem {
     dec += tyreTracks(ctx, site, decalHard, kit, rand, 1).count;
     dec += wallDecals(ctx, site, decalSoft, decalHard, kit, rand, 1).count;
     dec += hotspotDecals(ctx, site, decalSoft, decalHard, kit, rand, furniture.hotspots).count;
+    dec += groundingDust(ctx, site, decalSoft, kit, rand, this._colliders).count;
 
     this.tiers[0] = core.build(ctx, this.root);
     this.tiers[1] = detail.build(ctx, this.root);
