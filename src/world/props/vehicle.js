@@ -557,7 +557,11 @@ export function placeVehicles(ctx, site, sets, rand, density = 1) {
       // spot, which is the PAVEMENT, so the hero car ended up parked across a
       // shopfront with all four wheels up on the footway.
       const roadY = site.groundAt(ax.ax + ax.ux * ax.len * t, ax.az + ax.uz * ax.len * t);
-      for (const inset of [2.6, 3.2, 3.9, 4.7]) {
+      // Walk in from the kerb. The far insets matter: on this map the east
+      // footway is nearly 5 m deep, and with only four steps every car on
+      // that side failed the carriageway-height test and fell back to the
+      // west kerb, which put all seven of them in one line.
+      for (const inset of [2.6, 3.2, 3.9, 4.7, 5.6, 6.5]) {
         const off = (ax.halfW - inset) * side;
         const x = ax.ax + ax.ux * ax.len * t + ax.nx * off;
         const z = ax.az + ax.uz * ax.len * t + ax.nz * off;
@@ -579,9 +583,13 @@ export function placeVehicles(ctx, site, sets, rand, density = 1) {
 
   // Two parked at the kerb and one burnt out across the middle. That last one
   // is how Call of Duty blocks a lane, and it is why bo6_03 has a foreground.
+  // Evenly spread down the whole street rather than clustered at three
+  // fractions. Nothing here can know where the camera will stand, so the only
+  // robust guarantee that a preset looking down the street has a car in it is
+  // a car every twelve metres or so, on alternating kerbs.
   const slots = [
-    [0.28, -1, 'A'], [0.55, 0.3, 'B'], [0.78, -1, 'A'],
-    [0.10, 1, 'A'], [0.20, -1, 'A'], [0.88, 1, 'A'], [0.96, -1, 'B'],
+    [0.12, -1, 'A'], [0.24, 1, 'A'], [0.36, -1, 'A'], [0.48, 0.3, 'B'],
+    [0.60, 1, 'A'], [0.72, -1, 'A'], [0.86, 1, 'B'],
   ];
   let placed = 0;
   const dbg = [];
