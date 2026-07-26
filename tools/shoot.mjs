@@ -3,11 +3,25 @@
  * Deterministic screenshot harness for the visual-critic loop.
  *
  *   node tools/shoot.mjs [--out dir] [--shots a,b,c] [--w 1920] [--h 1080] [--headed]
+ *                        [--static] [--checks] [--port N]
  *
  * Boots the dev server if it is not already up, drives the game to a fixed set
  * of camera presets via window.__COD__, and writes one PNG per preset. Every
  * shot is taken from the same seed/time-of-day so successive runs are
  * pixel-comparable and a critic can judge changes rather than noise.
+ *
+ *   --shots judged   the ten presets the blind A/B is fought with (the default)
+ *   --shots read     the 5 / 30 / 80 m facade instruments
+ *   --shots all      everything, including `sunset`
+ *   --static         serve the BUILT dist via `vite preview` instead of the dev
+ *                    server, so a concurrent edit cannot HMR-reload mid-capture
+ *   --checks         also compute the numeric acceptance criteria from the PNGs
+ *
+ * JUDGE AT 1920x1080. Every frame in refs/ is 1920x1080; anything else has to be
+ * resampled to sit beside one, and the panel that gets resampled is identifiable
+ * as the one that got resampled. The defaults here are already 1920x1080 and the
+ * report carries `judgeNative` so a smaller iteration pass cannot be mistaken
+ * for a scoreable one.
  */
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
