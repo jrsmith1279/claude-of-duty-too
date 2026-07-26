@@ -531,7 +531,7 @@ function opening(bs, winSet, winLit, detail, g, kit, fr, f, s, cillY, headY, ww,
     _c.copy(wall).multiplyScalar(0.86);
     place(bs, 'brick', box(ww, wh, 0.10, 0.012), fr, f, s, yc, 0.18, _c, false);
     n++;
-    n += pane(winSet, kit, 'paneBlocked', fr, f, s, yc, ww, wh, rand, 0.60);
+    n += pane(winSet, kit, 'paneBlocked', fr, f, s, yc, ww, wh, rand, 0.42);
   } else {
     const kind = o.slot ? (rand() < 0.6 ? 'paneDark' : 'paneCurtain')
       : pick(UPPER_PANES, rand, o.skyBias);
@@ -542,7 +542,7 @@ function opening(bs, winSet, winLit, detail, g, kit, fr, f, s, cillY, headY, ww,
     const px = f.ax + fr.ux * s, pz = f.az + fr.uz * s;
     const far = Math.hypot(px - o.midX, pz - o.midZ) > 18 ? 2.4 : 0.6;
     const set = (winLit && rand() < 0.18 * far) ? winLit : winSet;
-    n += pane(set, kit, kind, fr, f, s, yc, ww, wh, rand, 0.55);
+    n += pane(set, kit, kind, fr, f, s, yc, ww, wh, rand, 0.38);
   }
 
   // Cill: proud enough to throw a real line of shade and to start the streak
@@ -745,7 +745,7 @@ function groundStorey(bs, winSet, winLit, g, kit, fr, f, gH, wall, rand, bays, f
     // The infill itself.
     if (doorway) {
       const kind = rand() < 0.6 ? 'doorTimber' : 'doorMetal';
-      n += pane(winSet, kit, kind, fr, f, s, openBot + openH * 0.5, openW, openH, rand, 0.60);
+      n += pane(winSet, kit, kind, fr, f, s, openBot + openH * 0.5, openW, openH, rand, 0.46);
       // Fanlight over the door.
       n += pane(winSet, kit, 'paneDark', fr, f, s, openTop + 0.20, 0.55, 0.25, rand, 0.5);
       _c.copy(wall).multiplyScalar(1.06);
@@ -756,7 +756,7 @@ function groundStorey(bs, winSet, winLit, g, kit, fr, f, gH, wall, rand, bays, f
       // 30% of the glazed ones are lit from inside. The strip light painted in
       // shopGlass is the emissive shape, so the spill lands where the light is.
       const set = (winLit && kind === 'shopGlass' && rand() < 0.30) ? winLit : winSet;
-      n += pane(set, kit, kind, fr, f, s, openBot + openH * 0.5, openW, openH, rand, 0.58);
+      n += pane(set, kit, kind, fr, f, s, openBot + openH * 0.5, openW, openH, rand, 0.46);
     }
 
     // Signage. 45% get a board standing 0.10 m proud of the fascia so it casts

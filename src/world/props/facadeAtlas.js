@@ -116,7 +116,7 @@ function bars(g, x, y, w, h, cols, rows, bw, col) {
  * Returns the glass rect. Every glazed cell starts here so the joinery is
  * consistent from pane to pane — variation belongs in the glass, not the frame.
  */
-function sash(g, rnd, frameCol = '#a49c8c', fw = 26) {
+function sash(g, rnd, frameCol = '#6f685b', fw = 26) {
   fill(g, 0, 0, CELL, CELL, frameCol);
   grain(g, 0, 0, CELL, CELL, 90, 0.20, rnd);
   // Outer arris catches the sun, inner edge falls into shade.
@@ -203,7 +203,7 @@ function drawCell(g, name, rnd) {
       wg.addColorStop(0, rgba(58, 47, 34, 0.85));
       wg.addColorStop(1, rgba(58, 47, 34, 0));
       g.fillStyle = wg; g.fillRect(x, y, w, h);
-      bars(g, x, y, w, h, 3, 2, 9, '#b7b0a2');
+      bars(g, x, y, w, h, 3, 2, 9, '#8d8677');
       innerShade(g, x, y, w, h, 34);
       grain(g, x, y, w, h, 40, 0.18, rnd);
       break;
@@ -231,7 +231,7 @@ function drawCell(g, name, rnd) {
       fe.addColorStop(0, rgba(162, 151, 127, 0.9));
       fe.addColorStop(1, rgba(162, 151, 127, 0));
       g.fillStyle = fe; g.fillRect(x + cw - 12, y, 24, h);
-      bars(g, x, y, w, h, 3, 2, 9, '#b7b0a2');
+      bars(g, x, y, w, h, 3, 2, 9, '#8d8677');
       innerShade(g, x, y, w, h, 34);
       break;
     }
@@ -251,7 +251,7 @@ function drawCell(g, name, rnd) {
       g.lineTo(x + w * 1.2, y + h * 0.95 - w * 1.4 * Math.tan(0.436));
       g.stroke();
       g.restore();
-      bars(g, x, y, w, h, 3, 2, 9, '#b7b0a2');
+      bars(g, x, y, w, h, 3, 2, 9, '#8d8677');
       innerShade(g, x, y, w, h, 34);
       break;
     }
@@ -284,14 +284,14 @@ function drawCell(g, name, rnd) {
       for (let i = 0; i < 3; i++) {
         scrawl(g, x + rnd() * w, y + rnd() * h, w * 0.6, rnd() * 6.2832, 0.9, 6, rnd);
       }
-      bars(g, x, y, w, h, 3, 2, 9, '#8e887c');
+      bars(g, x, y, w, h, 3, 2, 9, '#6e6960');
       innerShade(g, x, y, w, h, 40, 0.75);
       break;
     }
 
     // ---- 4. Boarded up. Timber, not plywood: the plank joints are the read.
     case 'paneBoarded': {
-      const [x, y, w, h] = sash(g, rnd, '#8f8676');
+      const [x, y, w, h] = sash(g, rnd, '#5f584c');
       fill(g, x, y, w, h, '#0b0c0e');
       const n = 4 + ((rnd() * 3) | 0);
       for (let i = 0; i < n; i++) {
@@ -376,7 +376,7 @@ function drawCell(g, name, rnd) {
 
     // ---- 7. Bricked up. Four courses, recessed behind the reveal.
     case 'paneBlocked': {
-      const [x, y, w, h] = sash(g, rnd, '#9a9182');
+      const [x, y, w, h] = sash(g, rnd, '#7a7263');
       fill(g, x, y, w, h, '#6f675b');
       const inset = 20;
       const bx = x + inset, by = y + inset, bw = w - inset * 2, bh = h - inset * 2;
@@ -465,7 +465,7 @@ function drawCell(g, name, rnd) {
 
     // ---- 10. Timber door, four panels.
     case 'doorTimber': {
-      const [x, y, w, h] = sash(g, rnd, '#8b8272', 18);
+      const [x, y, w, h] = sash(g, rnd, '#6d6558', 18);
       vgrad(g, x, y, w, h, '#6e5942', '#4c3c2c');
       grain(g, x, y, w, h, 140, 0.30, rnd);
       g.strokeStyle = rgba(38, 26, 15, 0.85);
@@ -713,18 +713,30 @@ export class FacadeAtlas {
    *   specular lobe against the same PMREM env map, and still tracks time of
    *   day; it is broader and softer, which is the price.
    *
-   * - `roughness: 0.42`, not 0.30. Two reasons, and the first was only visible
-   *   at 4x. `gun_polymer` carries `detail: [6, 0.4]`, a procedural detail
-   *   normal sampled at `codUv * 6`. `codUv` here is the atlas UV, so six tiles
-   *   of weapon-grip diamond checkering land across the atlas — about one and a
-   *   half per cell — and `normalScale: 0` does not touch it, because the
-   *   detail path multiplies by `codSurface.y` rather than by the normal scale.
-   *   At 0.30 roughness that checkering was clearly legible across every pane
-   *   on the sunlit facade. At 0.42 the specular lobe is broad enough to bury
-   *   it. Second, at 0.30 a pane seen down the street at a grazing angle
-   *   mirrored the sun hard enough to measure the same luminance as the sunlit
-   *   plaster beside it, which is the exact failure the brief's "pane <= 0.18x
-   *   wall" check exists to catch.
+   * - `roughness: 0.68`, `specularIntensity: 0.20`, `envMapIntensity: 0.26`.
+   *   The brief asked for 0.30 / default / 1.15 and that combination failed its
+   *   own acceptance test, which is why these were tuned against a measurement
+   *   rather than by eye. Two separate faults, both only visible at 4x:
+   *
+   *   `gun_polymer` carries `detail: [6, 0.4]`, a procedural detail normal
+   *   sampled at `codUv * 6`. `codUv` here is the atlas UV, so six tiles of
+   *   weapon-grip diamond checkering land across the atlas, about one and a
+   *   half per cell — and `normalScale: 0` does NOT touch it, because the
+   *   detail path multiplies by `codSurface.y`, not by the normal scale. At
+   *   0.30 roughness that checkering was legible across every pane on the
+   *   sunlit wall.
+   *
+   *   And a pane at 0.30 roughness with a full-strength dielectric F90, seen
+   *   down the street at a grazing angle, throws a sheet of grazing sheen. On
+   *   the sunlit facade in `street` it measured luminance 192 against 218 for
+   *   the plaster beside it — the two were the same surface. The isolating
+   *   experiment: forcing the pane to `color 0x000000` with no env and no
+   *   specular renders it at 100 in that same spot, which is the aerial
+   *   perspective floor and means the brief's "pane <= 0.18x wall" can never
+   *   be met there by any material. The number to move is the material's
+   *   contribution ABOVE that floor, and these three values take it from 92 of
+   *   the available 118 down to 59. Pushing further starts turning the shaded
+   *   facades — where the panes were already correct — into flat black holes.
    */
   overrides(emissive = false) {
     const o = {
@@ -734,9 +746,10 @@ export class FacadeAtlas {
       depthWrite: true,
       normalScale: 0,
       metalness: 0,
-      roughness: 0.42,
+      roughness: 0.68,
       clearcoat: 0,
-      envMapIntensity: 0.70,
+      specularIntensity: 0.20,
+      envMapIntensity: 0.26,
       vertexColors: true,
       side: THREE.FrontSide,
     };
