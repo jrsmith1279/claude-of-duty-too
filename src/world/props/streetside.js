@@ -201,7 +201,7 @@ function bollards(bs, site, rand, r, count) {
 }
 
 /** A concrete planter with a shrub in it — the one green accent in the street. */
-function planter(bs, site, rand, x, y, z, yaw) {
+function planter(bs, leaves, site, rand, x, y, z, yaw) {
   const g = geo();
   const c = Math.cos(yaw), s = Math.sin(yaw);
   let n = 0;
@@ -222,13 +222,19 @@ function planter(bs, site, rand, x, y, z, yaw) {
 
   // Crossed alpha cards on the existing foliage key, which already carries
   // translucency and alphaTest, so a leaf lit from behind glows.
+  //
+  // These go to the DETAIL set rather than to core. `foliage` is a key nothing
+  // else in the prop system uses, so it opens a bucket wherever it lands, and
+  // core is zoned — two zones, two draws. `detail` is un-zoned and never casts
+  // shadow, so the whole map's greenery is one draw, and it is also the right
+  // tier: a shrub is the first thing that should go on a weak GPU.
   for (let k = 0, m = 5 + ((rand() * 4) | 0); k < m; k++) {
     const ox = (rand() - 0.5) * 0.9, oz = (rand() - 0.5) * 0.32;
     const sc = 0.75 + rand() * 0.5;
     const spin = rand() * 3.14;
     jitterColor(_c, rand, 0.26, 0.06, -0.1);
     for (const a of [0, 1.05, 2.1]) {
-      bs.addPitched('foliage', g.leafCard, x + ox * c + oz * s, y + 0.52,
+      leaves.addPitched('foliage', g.leafCard, x + ox * c + oz * s, y + 0.52,
         z - ox * s + oz * c, yaw + spin + a, 0, 0, sc, sc, sc, _c, false);
       n++;
     }
@@ -310,7 +316,7 @@ export function streetside(ctx, site, core, rand, density = 1, env = null) {
   for (let i = 0, k = Math.round(4 * density); i < k; i++) {
     const p = spot(0.9, 30);
     if (!p) break;
-    parts += planter(bs, site, rand, p.x, p.y, p.z,
+    parts += planter(bs, env?.detail || bs, site, rand, p.x, p.y, p.z,
       (p.nx || p.nz) ? Math.atan2(p.nx, p.nz) + Math.PI / 2 : rand() * 6.2832);
   }
   for (let i = 0, k = Math.round(6 * density); i < k; i++) {

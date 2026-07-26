@@ -226,8 +226,14 @@ export function overheadLines(ctx, site, bs, rand, density = 1) {
             // measurement: a sheet on a line bellies about a tenth of its width.
             const cloth = shellGeo(clothGeo(cw, ch, 0.10 * cw, rand, 0.10), SHELL_T.laundry);
             if (laundryTint(_c, rand, saturatedLeft)) saturatedLeft--;
+            // Shadows off, and this is a budget decision rather than an art
+            // one. `fabric_light` is a new material key, so it opens a bucket
+            // per zone; casting would make that three draws per zone instead
+            // of one, measured, and this item is funded for four in total.
+            // The awnings and canopies still cast, which is where cloth
+            // shadow actually lands on something a camera is looking at.
             bs.add('fabric_light', cloth, cx, y - drop - ch * 0.5, cz,
-              0, Math.atan2(ux, uz) + (rand() - 0.5) * 0.5, 0, 1, 1, 1, _c, true);
+              0, Math.atan2(ux, uz) + (rand() - 0.5) * 0.5, 0, 1, 1, 1, _c, false);
             parts++;
           }
         }

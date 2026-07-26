@@ -174,7 +174,7 @@ function rimGeo(bare) {
 
 /** Half-cylinder arch liner, seen from inside the arch as well as outside. */
 function linerGeo() {
-  const g = new THREE.CylinderGeometry(0.40, 0.40, 0.21, 12, 1, true, 0, Math.PI);
+  const g = new THREE.CylinderGeometry(0.365, 0.365, 0.21, 12, 1, true, 0, Math.PI);
   g.rotateZ(Math.PI / 2);
   projectUV(g);
   return twoSided(g);
@@ -385,7 +385,7 @@ export function car(sets, rand, x, y, z, yaw, variant = 'A', colliders = null) {
     // bowls behind it are trim and bright, and they are what stops a headlight
     // reading as a painted rectangle.
     if (burnt) _c.setRGB(0.20, 0.20, 0.20); else _c.setRGB(1.9, 1.95, 2.0);
-    put(veh, 'car_paint', g.lamp, sx * 0.60, 0.79, 2.20, 0, 0, 1, 1, 1, _c, false);
+    put(veh, 'car_paint', g.lamp, sx * 0.60, 0.79, 2.20, 0, 0, 1, 1, 1, _c, true);
     if (!burnt) {
       _c.setRGB(2.4, 2.4, 2.4);
       for (const ob of [-0.085, 0.085]) {
@@ -393,17 +393,17 @@ export function car(sets, rand, x, y, z, yaw, variant = 'A', colliders = null) {
       }
     }
     paintTint(_c, 0xd08a2a, burnt ? 0.25 : 1.6);
-    put(veh, 'car_paint', g.indicator, sx * 0.80, 0.79, 2.170, 0, 0, 1, 1, 1, _c, false);
+    put(veh, 'car_paint', g.indicator, sx * 0.80, 0.79, 2.170, 0, 0, 1, 1, 1, _c, true);
     paintTint(_c, 0xb02418, burnt ? 0.25 : 1.5);
-    put(veh, 'car_paint', g.tail, sx * 0.62, 0.98, -2.230, 0, 0, 1, 1, 1, _c, false);
+    put(veh, 'car_paint', g.tail, sx * 0.62, 0.98, -2.230, 0, 0, 1, 1, 1, _c, true);
   }
 
   // --- Bumpers. The material break between a painted wing and an unpainted
   // bumper is one of the strongest realism cues a car has, so these are
   // separate parts in the matte bucket rather than more body colour.
   _c.setRGB(burnt ? 0.20 : 0.52, burnt ? 0.20 : 0.52, burnt ? 0.20 : 0.54);
-  put(veh, 'car_trim', g.bumper, 0, 0.46, 2.230, 0.05, 0, 1, 1, 1, _c, true);
-  put(veh, 'car_trim', g.bumper, 0, 0.50, -2.250, -0.05, 0, 1, 1, 1, _c, true);
+  put(veh, 'car_trim', g.bumper, 0, 0.46, 2.230, 0.05, 0, 1, 1, 1, _c, false);
+  put(veh, 'car_trim', g.bumper, 0, 0.50, -2.250, -0.05, 0, 1, 1, 1, _c, false);
   _c.multiplyScalar(0.72);
   put(veh, 'car_trim', g.valance, 0, 0.28, 2.185, 0.22, 0, 1, 1, 1, _c, false);
   for (const sx of [-1, 1]) {
@@ -419,7 +419,7 @@ export function car(sets, rand, x, y, z, yaw, variant = 'A', colliders = null) {
 
   // --- Side detail.
   for (const sx of [-1, 1]) {
-    put(veh, 'car_paint', g.mirrorPod, sx * 0.965, 1.06, 0.60, 0, 0, 1, 1, 1, paint, false);
+    put(veh, 'car_paint', g.mirrorPod, sx * 0.965, 1.06, 0.60, 0, 0, 1, 1, 1, paint, true);
     _c.setRGB(0.30, 0.30, 0.31);
     put(veh, 'car_trim', g.mirrorStalk, sx * 0.905, 1.05, 0.60, 0, 0, 1, 1, 1, _c, false);
     if (!burnt) {
@@ -552,12 +552,18 @@ export function placeVehicles(ctx, site, sets, rand, density = 1) {
     for (const dt of [0, 0.02, -0.02, 0.045, -0.045, 0.075, -0.075]) {
       const t = t0 + dt;
       if (t < 0.02 || t > 0.98) continue;
+      // Height of the carriageway itself at this station. A car has to be on
+      // it: the first pass walked in from the kerb and took the first flat
+      // spot, which is the PAVEMENT, so the hero car ended up parked across a
+      // shopfront with all four wheels up on the footway.
+      const roadY = site.groundAt(ax.ax + ax.ux * ax.len * t, ax.az + ax.uz * ax.len * t);
       for (const inset of [2.6, 3.2, 3.9, 4.7]) {
         const off = (ax.halfW - inset) * side;
         const x = ax.ax + ax.ux * ax.len * t + ax.nx * off;
         const z = ax.az + ax.uz * ax.len * t + ax.nz * off;
         const y = site.groundAt(x, z);
         if (y === null) continue;
+        if (roadY !== null && Math.abs(y - roadY) > 0.05) continue;
         // All four corners on one level, so a car never straddles a kerb with
         // two wheels in the air.
         const a = site.groundAt(x + ax.nx * 0.85, z + ax.nz * 0.85);

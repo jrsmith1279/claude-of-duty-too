@@ -822,7 +822,17 @@ export function streetFurniture(ctx, site, bs, rand, density = 1, env = null) {
     ? Math.atan2(site.facades[0].bx - site.facades[0].ax, site.facades[0].bz - site.facades[0].az)
     : 0;
   {
-    const sets = { veh: env?.vehicles || bs, rubber: bs, colliders };
+    const veh = env?.vehicles || bs;
+    // props-core built the vehicles set with the default 45 m zone length.
+    // Measured, that is 16 draws rather than the 4 this item is funded for:
+    // two Z-zones times two shadow flags times two variants. Un-zoning it
+    // costs nothing — there are seven cars in the map and they are spread over
+    // 100 m of street, so a zone split culls almost nothing, while every split
+    // multiplies bucket count directly. This is a field on the object
+    // props-core handed us, not an edit to their file; flagged to them because
+    // it contradicts the rationale in their comment.
+    if (veh !== bs) veh.zoneLen = Infinity;
+    const sets = { veh, rubber: bs, colliders };
     const v = placeVehicles(ctx, site, sets, rand, density);
     parts += v.parts;
     hotspots.push(...v.hotspots);
