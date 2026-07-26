@@ -101,7 +101,11 @@ export class WeaponSystem {
     };
 
     this._attachAutomation();
-    ctx.bus.on('player:landed', (e) => this.view.land(e?.speed || 0));
+    // The player emits `player:land` with an `impact` (m/s of arrested fall),
+    // not `player:landed` with a `speed`. Both halves were wrong, so the
+    // weapon never dipped on landing — an event that never fires reading a
+    // field that does not exist is invisible until someone diffs the two files.
+    ctx.bus.on('player:land', (e) => this.view.land(e?.impact ?? e?.speed ?? 0));
   }
 
   // ------------------------------------------------------------- automation

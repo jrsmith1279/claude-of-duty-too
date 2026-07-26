@@ -235,10 +235,13 @@ export class AudioSystem {
       if (e?.by == null || e?.by === 'player' || e?.by === ctx.player) this._blip(1180, 0.055, 0.11);
     });
 
-    bus.on('bot:fired', (e) => {
+    // The AI emits `ai:fired`, not `bot:fired`. This listener spent the whole
+    // of Wave 2 bound to an event nothing has ever emitted.
+    bus.on('ai:fired', (e) => {
       if (!this.graph) return;
       const p = e?.position || e?.muzzle;
-      gunshot(this.graph, e?.weapon || 'ak74', { x: p?.x ?? 0, y: p?.y ?? 1.5, z: p?.z ?? 0 });
+      const gun = e?.weapon || (e?.team === 'b' || e?.bot?.team === 'b' ? 'ak74' : 'm4');
+      gunshot(this.graph, gun, { x: p?.x ?? 0, y: p?.y ?? 1.5, z: p?.z ?? 0 });
     });
 
     bus.on('bullet:whizz', (e) => {

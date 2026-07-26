@@ -26,9 +26,17 @@ const RIFLE = {
   burst: [3, 6], burstGap: [0.35, 1.0], reload: 2.3,
 };
 
+// Sound signature per team. Both sides carry the same ballistic profile, but a
+// firefight where you cannot tell incoming from outgoing by ear is a worse
+// firefight; the audio system already has six distinct gun signatures.
+const TEAM_GUN = { a: 'm4', b: 'ak74' };
+
 const _v0 = new THREE.Vector3();
 const _v1 = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
+const _w0 = new THREE.Vector3();
+const _w1 = new THREE.Vector3();
+const _w2 = new THREE.Vector3();
 const _v3 = new THREE.Vector3();
 const _v4 = new THREE.Vector3();
 const _q0 = new THREE.Quaternion();
@@ -568,8 +576,15 @@ export class Bot {
     _m0.makeRotationFromQuaternion(_q0.setFromUnitVectors(UP, _v2));
     _m0.setPosition(muzzle);
     ctx.fx?.muzzleFlash?.(_m0, 0.7);
-    ctx.audio?.playAt?.('rifle', muzzle, { variant: this.team });
-    ctx.bus?.emit('ai:fired', { bot: this, muzzle, dir: _v2 });
+    // The report goes out on the bus only. It used to *also* go straight to
+    // ctx.audio, which was the sole reason bots were audible at all — the
+    // audio system's listener was bound to `bot:fired`, an event nothing
+    // emits. With the listener corrected, playing it here as well would fire
+    // every bot shot twice.
+    ctx.bus?.emit('ai:fired', {
+      bot: this, muzzle, dir: _v2, team: this.team,
+      weapon: TEAM_GUN[this.team] || 'ak74',
+    });
     this.ai.emitNoise(muzzle, 1, this.team, ctx);
 
     // Resolve the shot: nearest of world geometry and any character.
@@ -589,10 +604,39 @@ export class Bot {
         _v4.copy(this.position).sub(ctx.player.position).setY(0).normalize();
         ctx.player.damage(dmg, _v4);
       }
-    } else if (worldHit) {
-      ctx.fx?.impact?.(worldHit.point, worldHit.normal, worldHit.material || 'concrete_wall', 1);
+    } else {
+      if (worldHit) ctx.fx?.impact?.(worldHit.point, worldHit.normal, worldHit.material || 'concrete_wall', 1);
+      // A round that missed but went past the player's head. `bullet:whizz`
+      // had a listener in the audio system and no emitter anywhere, so the
+      // single loudest cue that you are being shot at was missing. Note this
+      // is outside the `worldHit` test: a round down an open street hits
+      // nothing at all and is exactly the one you most need to hear.
+      this._whizz(muzzle, _v2, limit, ctx);
     }
     ctx.fx?.tracer?.(muzzle, _v3.copy(_v2).multiplyScalar(limit).add(muzzle), 900);
+  }
+
+  /**
+   * Perpendicular miss distance from the player's head to this shot.
+   *
+   * Its own scratch, deliberately: `muzzle` is `_v1` and `dir` is `_v2` for the
+   * whole of `_fireShot`, and the tracer is emitted after this call.
+   */
+  _whizz(muzzle, dir, limit, ctx) {
+    const p = ctx.player;
+    if (!p?.position || !ctx.bus) return;
+    _w0.copy(p.position);
+    _w0.y += (p.eyeHeight ?? 1.6) * 0.92;
+    _w0.sub(muzzle);
+    const t = _w0.dot(dir);
+    if (t < 1 || t > limit) return;              // behind the muzzle, or short of the player
+    _w1.copy(dir).multiplyScalar(t).sub(_w0);    // closest-approach offset
+    const miss = _w1.length();
+    if (miss > 3.2 || miss < 0.001) return;
+    // Which ear it went past: sign of the offset along the shot's right.
+    _w2.set(dir.z, 0, -dir.x);
+    const side = _w2.lengthSq() > 1e-6 && _w1.dot(_w2) < 0 ? -1 : 1;
+    ctx.bus.emit('bullet:whizz', { distance: miss, side });
   }
 
   applyDamage(amount, dirWorld, part, from, ctx) {
