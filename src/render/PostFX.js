@@ -160,7 +160,11 @@ export class PostFX {
       minExposure: 0.22,
       maxExposure: 7.5,
       chromatic: 0.0009,
-      vignette: 0.34,
+      // 0.34 took the bottom corners down 31%, which on a street frame is
+      // exactly where the shadowed half of the road sits — it read as a black
+      // wedge rather than as a graded surface. The vignette is applied after
+      // metering, so this is pure image, not exposure.
+      vignette: 0.20,
       grain: 0.026,
       dirt: 0.45,
       sharpness: 0.62,
