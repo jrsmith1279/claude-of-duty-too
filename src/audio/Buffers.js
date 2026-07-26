@@ -107,7 +107,17 @@ export function noiseSource(ac, kind, rate = 1, rnd = Math.random) {
  * `setTargetAtTime` is deliberately avoided — its tail never reaches zero and
  * hundreds of never-ending gain nodes is a real leak in a shooter.
  */
+/**
+ * Web Audio throws a RangeError on a negative schedule time, and a voice that
+ * wants to place a layer slightly *before* its nominal time (a cloth rustle
+ * 40 ms ahead of the magazine seating, say) will go negative whenever the
+ * context has only just started — which is exactly when the first shot of a
+ * match is fired. Every scheduling entry point clamps.
+ */
+export const at = (t) => (t > 0 ? t : 0);
+
 export function hit(param, t, peak, attack, decay, floor = 0.0001) {
+  t = at(t);
   param.setValueAtTime(0.0001, t);
   if (attack > 0) param.exponentialRampToValueAtTime(Math.max(peak, 0.0002), t + attack);
   else param.setValueAtTime(Math.max(peak, 0.0002), t + 0.0005);
@@ -117,7 +127,8 @@ export function hit(param, t, peak, attack, decay, floor = 0.0001) {
 
 /** Linear ramp helper for filter cutoffs, which sound wrong swept exponentially. */
 export function sweep(param, t, from, to, time) {
-  param.setValueAtTime(from, t);
+  t = at(t);
+  param.setValueAtTime(Math.max(20, from), t);
   param.exponentialRampToValueAtTime(Math.max(20, to), t + time);
 }
 
@@ -138,6 +149,7 @@ export function gain(ac, v = 0) {
 
 /** Starts `src` at `t` and tears the whole chain down when it finishes. */
 export function fire(src, t, dur, onEnd) {
+  t = at(t);
   try {
     src.start(t, src._offset || 0);
     src.stop(t + dur);

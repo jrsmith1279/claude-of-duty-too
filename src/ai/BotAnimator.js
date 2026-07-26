@@ -158,7 +158,12 @@ export class BotAnimator {
     const s = Math.sin(yaw), c = Math.cos(yaw);
     for (const f of this.feet) {
       const lx = f.side * HIP_HALF;
-      f.plant.set(pos.x + c * lx, pos.y, pos.z - s * lx);
+      // Offset fore/aft. Two feet exactly abreast is a degenerate state: both
+      // want to step on the same frame forever, one always waits out the
+      // other's swing, and the waiting foot ends up further behind than the
+      // leg can reach. A natural stance breaks it permanently.
+      const lz = f.side * 0.085;
+      f.plant.set(pos.x + c * lx + s * lz, pos.y, pos.z - s * lx + c * lz);
       f.pos.copy(f.plant);
       f.prev.copy(f.plant);
       f.target.copy(f.plant);
@@ -213,7 +218,7 @@ export class BotAnimator {
     const running = speed > 2.7;
     // 0.75 m step at a 1.4 m/s walk, 1.25 m at a 4.5 m/s run.
     const stride = THREE.MathUtils.clamp(0.46 + speed * 0.175, 0.42, 1.28) * (1 - crouch * 0.28);
-    const swingTime = THREE.MathUtils.clamp(0.40 - speed * 0.042, 0.16, 0.40);
+    const swingTime = THREE.MathUtils.clamp(0.34 - speed * 0.030, 0.15, 0.34);
     const c = Math.cos(this.yaw), sn = Math.sin(this.yaw);
     const invSpeed = speed > 1e-3 ? 1 / speed : 0;
 
@@ -267,15 +272,33 @@ export class BotAnimator {
 
       const err = Math.hypot(f.plant.x - f.nx, f.plant.z - f.nz);
       const yawErr = Math.abs(shortAngle(f.plantYaw - this.yaw));
-      const threshold = Math.max(0.235, stride * 0.5);
+      const threshold = THREE.MathUtils.clamp(stride * 0.5, 0.235, 0.40);
       const score = err / threshold + yawErr / 0.5;
       if (score > 1 && score > wantErr) { want = i; wantErr = score; }
     }
 
     // One foot on the ground at a time, except in a run, where a brief flight
     // phase is correct and is most of what makes a run read as a run.
-    const busy = swinging >= 0 && !(running && this.feet[swinging].t > 0.66);
-    if (want < 0 || busy) return;
+    if (want < 0) return;
+    if (swinging >= 0) {
+      const other = this.feet[swinging];
+      // Overlap is allowed late in a swing (a run's flight phase), and forced
+      // when the waiting foot has been left further behind than the leg can
+      // reach — a stalled step is what makes a bot walk in a squat.
+      const lag = Math.hypot(this.feet[want].plant.x - this.feet[want].nx,
+        this.feet[want].plant.z - this.feet[want].nz);
+      if (other.t > (running ? 0.62 : 0.78)) {
+        // fall through and start the second swing
+      } else if (lag > 0.52) {
+        other.t = 1;
+        other.swinging = false;
+        other.plant.copy(other.target);
+        other.pos.copy(other.target);
+        other.plantYaw = other.targetYaw;
+      } else {
+        return;
+      }
+    }
 
     const f = this.feet[want];
     f.prev.copy(f.pos);
@@ -334,8 +357,8 @@ export class BotAnimator {
         const dxz = Math.hypot(f.pos.x - jx, f.pos.z - jz);
         const vert = Math.sqrt(Math.max(LEG_MAX * LEG_MAX - dxz * dxz, 0.02));
         let limit = f.pos.y + ANKLE_Y + vert + (REST.hips.y - REST.thighL.y);
-        f.heel = THREE.MathUtils.clamp((hipTarget - limit) / 0.11, 0, 1);
-        limit += f.heel * 0.088;
+        f.heel = THREE.MathUtils.clamp((hipTarget - limit) / 0.14, 0, 1);
+        limit += f.heel * 0.118;
         hipTarget = Math.min(hipTarget, Math.max(limit, f.pos.y + 0.46));
       }
     }
@@ -398,9 +421,9 @@ export class BotAnimator {
       const heel = f.heel || 0;
       const yawRel0 = shortAngle(f.plantYaw - this.yaw);
       _a.set(
-        c * wx - sn * wz + Math.sin(yawRel0) * heel * 0.045,
-        f.pos.y - s.pos.y + ANKLE_Y + heel * 0.088,
-        sn * wx + c * wz + Math.cos(yawRel0) * heel * 0.045,
+        c * wx - sn * wz + Math.sin(yawRel0) * heel * 0.10,
+        f.pos.y - s.pos.y + ANKLE_Y + heel * 0.118,
+        sn * wx + c * wz + Math.cos(yawRel0) * heel * 0.10,
       );
 
       const thighRest = f.side < 0 ? REST.thighL : REST.thighR;

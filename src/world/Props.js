@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { makeRng } from './props/lib.js';
 import { Site, BatchSet } from './props/layout.js';
 import { scatterGround, rubblePiles, wallDrifts, wallBerms } from './props/clutter.js';
+import { DecalKit, groundDecals, wallDecals, tyreTracks } from './props/decals.js';
 
 /**
  * Everything in the world that is not the building shell.
@@ -90,6 +91,10 @@ export class PropSystem {
     const core = new BatchSet('core');
     const detail = new BatchSet('detail');
     const fine = new BatchSet('fine');
+    // Decals get their own set: they need a different material configuration
+    // (blended, depth-write off, polygon-offset) and a render order after the
+    // opaque props they sit on.
+    const decals = new BatchSet('decal');
 
     let pieces = 0;
     pieces += rubblePiles(ctx, site, core, rand, 1).pieces;
@@ -97,11 +102,22 @@ export class PropSystem {
     pieces += wallBerms(ctx, site, core, rand, 1).pieces;
     pieces += scatterGround(ctx, site, fine, rand, 1).pieces;
 
+    const kit = new DecalKit(0xd3ca1);
+    this.decalKit = kit;
+    let dec = 0;
+    dec += groundDecals(ctx, site, decals, kit, rand, 1).count;
+    dec += tyreTracks(ctx, site, decals, kit, rand, 1).count;
+    dec += wallDecals(ctx, site, decals, kit, rand, 1).count;
+
     this.tiers[0] = core.build(ctx, this.root);
     this.tiers[1] = detail.build(ctx, this.root);
     this.tiers[2] = fine.build(ctx, this.root);
+    this.tiers[1].push(...decals.build(ctx, this.root, {
+      overrides: kit.overrides(true), renderOrder: 3,
+    }));
 
     this.stats.pieces = pieces;
+    this.stats.decals = dec;
     this._tally();
   }
 

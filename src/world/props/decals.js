@@ -437,14 +437,12 @@ export function buildDecalAtlas(seed = 1) {
 // ---------------------------------------------------------------- geometry
 
 /** Unit quad in the XY plane facing +Z, UV-mapped to one atlas cell. */
-function quadFor(uv, flipU = false, tileU = 1) {
+function quadFor(uv, flipU = false) {
   const geo = new THREE.PlaneGeometry(1, 1, 1, 1);
   const a = geo.attributes.uv;
   const [u0, v0, u1, v1] = uv;
   for (let i = 0; i < a.count; i++) {
-    let u = a.getX(i);
-    if (flipU) u = 1 - u;
-    u = (u * tileU) % 1;
+    const u = flipU ? 1 - a.getX(i) : a.getX(i);
     a.setXY(i, u0 + (u1 - u0) * u, v0 + (v1 - v0) * a.getY(i));
   }
   a.needsUpdate = true;
@@ -466,10 +464,6 @@ export class DecalKit {
       if (!this.uv[k]) continue;
       this.quads[k] = [quadFor(this.uv[k], false), quadFor(this.uv[k], true)];
     }
-    // A long tyre track repeats its tread along U instead of stretching it.
-    if (this.uv.tyre) {
-      this.quads.tyreLong = [quadFor(this.uv.tyre, false, 1), quadFor(this.uv.tyre, true, 1)];
-    }
   }
 
   geo(kind, rand) {
@@ -485,7 +479,10 @@ export class DecalKit {
       transparent: true,
       opacity: 1,
       depthWrite: false,
-      alphaTest: blend ? 0 : 0.34,
+      // Even a fully blended decal wants a threshold: the padded gutter around
+      // every atlas cell is pure alpha zero and discarding it early saves
+      // blending a transparent quad over a large part of the road.
+      alphaTest: blend ? 0.02 : 0.34,
       polygonOffset: true,
       polygonOffsetFactor: -3,
       polygonOffsetUnits: -8,
@@ -539,6 +536,7 @@ export function groundDecals(ctx, site, bs, kit, rand, density = 1) {
   const anywhere = site.field((d) => gate(d) * (0.45 + wallFalloff(d, 3.5, 0)));
   const midRoad = site.field((d, corner, s) =>
     (d > 12 || d < 2.2 ? 0 : 1) * (s === 'asphalt' || s === 'asphalt_worn' ? 1.6 : 0.4));
+  if (nearWall.empty && anywhere.empty) return { count: 0 };
 
   const put = (field, n, kind, wMin, wMax, aspect, v, warm) => {
     for (let i = 0; i < n; i++) {
@@ -587,15 +585,12 @@ export function tyreTracks(ctx, site, bs, kit, rand, density = 1) {
 
   let count = 0;
   const lanes = Math.round(5 * density);
+  const drive = site.field((d) => (d > 9 || d < 3 ? 0 : 1));
+  if (drive.empty) return { count: 0 };
   for (let lane = 0; lane < lanes; lane++) {
-    // Pick a start point on open ground away from the walls.
-    let sx = 0, sz = 0, ok = false;
-    for (let tries = 0; tries < 40 && !ok; tries++) {
-      const p = site.field((d) => (d > 9 || d < 3 ? 0 : 1)).sample(rand);
-      if (!p) break;
-      sx = p.x; sz = p.z; ok = true;
-    }
-    if (!ok) continue;
+    const p = drive.sample(rand);
+    if (!p) break;
+    const sx = p.x, sz = p.z;
     const runLen = 8 + rand() * 26;
     const gauge = 1.55 + rand() * 0.25;
     const dir = rand() < 0.5 ? 1 : -1;
