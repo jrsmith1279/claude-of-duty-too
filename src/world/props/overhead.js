@@ -88,13 +88,17 @@ function geo() {
  * shirt through a warm-grey canvas: the multiplier needed is 0.86 red against
  * 0.19 green, and `jitterColor` only walks a warm/cool axis by design.
  *
- * So: author the colour you actually want, divide out the base, clamp. The
- * clamp matters — the surface shader also folds vertex colour into the
- * indirect term, and a multiplier much over 1.25 stops reading as pigment and
- * starts reading as an emissive.
+ * So: author the colour you actually want, divide out the base, clamp.
+ *
+ * On the clamp: `SurfaceShader` folds vertex colour into its AO term as
+ * `clamp(mean(vColor), 0, 1)`, so a multiplier above 1 costs nothing there —
+ * it saturates at "no occlusion" rather than compounding. The default 1.25 is
+ * therefore a taste limit for cloth and clutter, not a correctness one, and
+ * car paint raises it: `metal_painted`'s albedo map averages about 0.10 linear
+ * and a sand-coloured car is 0.26, which is simply a multiplier of 2.6.
  */
-function tintFor(out, wanted, base) {
-  const cl = (v) => (v < 0.05 ? 0.05 : v > 1.25 ? 1.25 : v);
+export function tintFor(out, wanted, base, maxK = 1.25) {
+  const cl = (v) => (v < 0.02 ? 0.02 : v > maxK ? maxK : v);
   out.setRGB(cl(wanted.r / base.r), cl(wanted.g / base.g), cl(wanted.b / base.b));
   return out;
 }
