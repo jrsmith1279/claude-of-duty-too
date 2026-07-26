@@ -162,7 +162,10 @@ void main(){
   float fade = smoothstep(0.0, max(iE.z, 1e-4), u) * (1.0 - smoothstep(1.0 - max(iE.w, 1e-4), 1.0, u));
   vCol = vec4(mix(iF.rgb, iG.rgb, u), mix(iF.a, iG.a, u) * fade);
   vQuad = position.xy * 2.0;
-  vSoft = iE.y;
+  // Soft-fade distance is a multiple of the particle's *current* radius, not an
+  // absolute. A 4 m smoke puff should feather over metres; a 2 cm dust wisp
+  // sitting 4 cm off the wall it came from must not be erased by the same rule.
+  vSoft = max(0.02, iE.y * sz);
 
   vec4 mvPosition = viewMatrix * vec4(wpos, 1.0);
   vViewPos = mvPosition.xyz;
@@ -182,7 +185,9 @@ uniform sampler2D uDepth;
 uniform float uSoftEnabled;
 uniform vec3 uSunColor;
 uniform vec3 uAmbient;
+uniform vec3 uGround;
 uniform vec3 uSunDirView;
+uniform vec3 uUpView;
 uniform float uGain;
 
 varying vec2 vUv;
@@ -210,8 +215,12 @@ ${lit ? `
   float ndl = dot(n, uSunDirView);
   float wrap = clamp(ndl * 0.5 + 0.5, 0.0, 1.0);
   float forward = pow(clamp(ndl, 0.0, 1.0), 3.0);
-  float selfShadow = mix(1.0, 0.38, clamp(tex.b * a, 0.0, 1.0));
-  col *= uAmbient + uSunColor * ((wrap * wrap * 0.95 + forward * 0.75) * selfShadow);
+  // Optical depth through the puff: thick centres are shadowed by their own
+  // near side, thin edges glow. Without this a puff is a flat disc of one tone.
+  float selfShadow = mix(1.0, 0.22, clamp(tex.b * 1.15, 0.0, 1.0));
+  float upness = clamp(dot(n, uUpView) * 0.5 + 0.5, 0.0, 1.0);
+  vec3 ambient = mix(uGround, uAmbient, upness);
+  col *= ambient + uSunColor * ((wrap * wrap * wrap * 1.15 + forward * 0.55) * selfShadow);
 ` : `
   col *= mix(1.0, 1.0 + tex.b * 0.8, 0.6);
 `}
@@ -276,7 +285,9 @@ export class ParticleField {
       uSoftEnabled: { value: 0 },
       uSunColor: { value: new THREE.Color(1, 0.95, 0.86) },
       uAmbient: { value: new THREE.Color(0.22, 0.27, 0.35) },
+      uGround: { value: new THREE.Color(0.08, 0.075, 0.07) },
       uSunDirView: { value: new THREE.Vector3(0, 1, 0) },
+      uUpView: { value: new THREE.Vector3(0, 1, 0) },
       uGain: { value: 1 },
       uTime: { value: 0 },
     };

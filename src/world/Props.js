@@ -100,7 +100,8 @@ export class PropSystem {
     // Decals get their own set: they need a different material configuration
     // (blended, depth-write off, polygon-offset) and a render order after the
     // opaque props they sit on.
-    const decals = new BatchSet('decal', Infinity, false);
+    const decalSoft = new BatchSet('decalSoft', Infinity, false);
+    const decalHard = new BatchSet('decalHard', Infinity, false);
 
     let pieces = 0;
     // Structure before scatter: the facade and roof passes claim their ground
@@ -118,14 +119,15 @@ export class PropSystem {
     const kit = new DecalKit(0xd3ca1);
     this.decalKit = kit;
     let dec = 0;
-    dec += groundDecals(ctx, site, decals, kit, rand, 1).count;
-    dec += tyreTracks(ctx, site, decals, kit, rand, 1).count;
-    dec += wallDecals(ctx, site, decals, kit, rand, 1).count;
+    dec += groundDecals(ctx, site, decalSoft, decalHard, kit, rand, 1).count;
+    dec += tyreTracks(ctx, site, decalHard, kit, rand, 1).count;
+    dec += wallDecals(ctx, site, decalSoft, decalHard, kit, rand, 1).count;
 
     this.tiers[0] = core.build(ctx, this.root);
     this.tiers[1] = detail.build(ctx, this.root);
     this.tiers[2] = fine.build(ctx, this.root);
-    this.tiers[1].push(...decals.build(ctx, this.root, {
+    this.tiers[1].push(...decalHard.build(ctx, this.root, { overrides: kit.overrides(false) }));
+    this.tiers[1].push(...decalSoft.build(ctx, this.root, {
       overrides: kit.overrides(true), renderOrder: 3,
     }));
 

@@ -253,11 +253,15 @@ export class FXSystem {
       _col.b * key * this.smokeSunGain,
     );
     if (sky?.skyColor) _col.copy(sky.skyColor); else _col.setRGB(0.35, 0.45, 0.62);
-    u.uAmbient.value.setRGB(
-      _col.r * this.smokeAmbientGain,
-      _col.g * this.smokeAmbientGain,
-      _col.b * this.smokeAmbientGain,
+    const ag = this.smokeAmbientGain;
+    u.uAmbient.value.setRGB(_col.r * ag, _col.g * ag, _col.b * ag);
+    // Ground bounce: warm, a third of the sky, so a puff has a dark warm belly
+    // instead of being uniformly blue-filled from every direction.
+    const gg = ag * 0.30 * (0.25 + 0.75 * Math.max(0, Math.min(1, key * 0.05)));
+    u.uGround.value.setRGB(
+      (_col.r * 0.5 + 0.42) * gg, (_col.g * 0.5 + 0.34) * gg, (_col.b * 0.5 + 0.26) * gg,
     );
+    u.uUpView.value.set(0, 1, 0).transformDirection(cam.matrixWorldInverse);
     this.add.uniforms.uGain.value = this.additiveGain;
   }
 
@@ -431,21 +435,21 @@ export class FXSystem {
     if (G.hit) this._at(0.18, () => this.impacts.impact(G.point, G.normal, G.material || 'asphalt', 1.4));
 
     // --- enemy positions and muzzle flash ------------------------------------
-    _v.copy(camPos).addScaledVector(_fwd, 26).addScaledVector(_right, -2.4);
-    _v.y = camPos.y - 0.15;
+    _v.copy(camPos).addScaledVector(_fwd, 15).addScaledVector(_right, -2.9);
+    _v.y = camPos.y - 0.28;
     _v2.copy(_v).sub(camPos);
     const dist = Math.max(1e-3, _v2.length());
     _v2.multiplyScalar(1 / dist);
     const blocked = ctx.physics?.raycast?.(camPos, _v2, dist, 1 | 2);
-    if (blocked) _v.copy(camPos).addScaledVector(_v2, Math.max(7, blocked.distance * 0.72));
+    if (blocked) _v.copy(camPos).addScaledVector(_v2, Math.max(6, blocked.distance * 0.70));
     const enemy = _stageEnemy.copy(_v);
 
     _v2.copy(camPos).sub(enemy).normalize();
-    this._at(0.012, () => this.muzzle.flash(enemy, 1.15, { dir: _v2, persist: 5.0 }));
+    this._at(0.012, () => this.muzzle.flash(enemy, 1.6, { dir: _v2, persist: 5.0 }));
 
     // A second shooter further back and to the other side.
-    _v.copy(camPos).addScaledVector(_fwd, 34).addScaledVector(_right, 4.5);
-    _v.y = camPos.y - 0.35;
+    _v.copy(camPos).addScaledVector(_fwd, 25).addScaledVector(_right, 4.2);
+    _v.y = camPos.y - 0.42;
     _v2.copy(_v).sub(camPos);
     const d2 = Math.max(1e-3, _v2.length());
     _v2.multiplyScalar(1 / d2);
@@ -453,7 +457,7 @@ export class FXSystem {
     if (blocked2) _v.copy(camPos).addScaledVector(_v2, Math.max(9, blocked2.distance * 0.7));
     const far = _stageEnemy2.copy(_v);
     _v2.copy(camPos).sub(far).normalize();
-    this._at(0.02, () => this.muzzle.flash(far, 0.85, { dir: _v2, persist: 5.0, light: false }));
+    this._at(0.02, () => this.muzzle.flash(far, 1.0, { dir: _v2, persist: 5.0, light: false }));
 
     // --- rounds in flight -----------------------------------------------------
     _p.copy(camPos).addScaledVector(_right, 1.5).addScaledVector(_up, 0.25).addScaledVector(_fwd, -3);
@@ -478,9 +482,9 @@ export class FXSystem {
     for (let i = 0; i < 5; i++) {
       const f = i / 4;
       _p.copy(camPos)
-        .addScaledVector(_right, 0.42 + f * 0.85)
-        .addScaledVector(_up, -0.16 + f * 0.42 - f * f * 0.34)
-        .addScaledVector(_fwd, 0.78 - f * 0.30);
+        .addScaledVector(_right, 0.16 + f * 0.62)
+        .addScaledVector(_up, -0.06 + f * 0.46 - f * f * 0.40)
+        .addScaledVector(_fwd, 0.52 - f * 0.14);
       _e.set(Math.random() * 6.28, Math.random() * 6.28, Math.random() * 6.28);
       _q2.setFromEuler(_e);
       this.shells.place(_p, _q2, 'rifle');
@@ -493,11 +497,12 @@ export class FXSystem {
     if (groundHit) {
       _p.copy(groundHit.point);
       const col = this.smoke.column(_p, {
-        rate: 11, duration: 40, radius: 0.5, rise: 1.85,
-        size0: 0.7, size1: 4.6, life: 5.5, alpha: 0.40,
-        r0: 0.085, g0: 0.078, b0: 0.072, r1: 0.44, g1: 0.42, b1: 0.40,
+        rate: 8, duration: 60, radius: 0.35, rise: 2.1, spread: 0.30,
+        size0: 0.45, size1: 2.5, life: 4.2, alpha: 0.55, lifeVar: 0.5,
+        drag: 0.5, gravity: 0.34, turb: 0.62, fadeOut: 0.45,
+        r0: 0.055, g0: 0.050, b0: 0.046, r1: 0.40, g1: 0.385, b1: 0.365,
       });
-      this.smoke.prime(col, 5.2, 40);
+      this.smoke.prime(col, 4.6, 32);
       this.decals.add(_p, groundHit.normal, 'scorch', 3.4, 0.85);
       this.decals.add(_p, groundHit.normal, 'oil', 1.6, 0.6);
     }
@@ -506,12 +511,12 @@ export class FXSystem {
     // already spread out rather than emerging from a point.
     _v.copy(camPos).addScaledVector(_fwd, 15).addScaledVector(_right, -1.5);
     _v.y = camPos.y - 0.9;
-    const haze = this.smoke.haze(_v, { rate: 4, duration: 40, radius: 3.2, alpha: 0.10, life: 9 });
-    this.smoke.prime(haze, 8, 34);
+    const haze = this.smoke.haze(_v, { rate: 3, duration: 60, radius: 3.4, alpha: 0.055, life: 10, size1: 3.2 });
+    this.smoke.prime(haze, 9, 26);
 
     // Airborne motes catching the sun — what makes a lit volume read as air.
-    for (let i = 0; i < 26; i++) {
-      const d = 2.5 + Math.random() * 22;
+    for (let i = 0; i < 14; i++) {
+      const d = 2.5 + Math.random() * 20;
       _p.copy(camPos)
         .addScaledVector(_fwd, d)
         .addScaledVector(_right, (Math.random() - 0.5) * d * 0.55)
@@ -529,7 +534,7 @@ export class FXSystem {
         s.tile = PT.SOFT; s.soft = 0.4;
         s.r0 = 0.72; s.g0 = 0.69; s.b0 = 0.62;
         s.r1 = 0.72; s.g1 = 0.69; s.b1 = 0.62;
-        s.a0 = 0.30; s.a1 = 0.30;
+        s.a0 = 0.20; s.a1 = 0.20;
         s.fadeIn = 0.02; s.fadeOut = 0.1;
         this.lit.spawn(s);
       });

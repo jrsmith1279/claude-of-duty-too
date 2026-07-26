@@ -220,16 +220,18 @@ vec4 dBulletConcrete(vec2 c, float seed){
   float spallR = 0.30 + 0.20 * fxFbm(vec2(ang * 1.8, seed * 3.0), 4);
   float spall = (1.0 - smoothstep(spallR * 0.62, spallR, r)) * (1.0 - hole);
   spall *= 0.40 + 0.85 * fxSat(fxWorley(c * 8.0 + seed) * 1.7);
-  float crack = fxSat(1.0 - fxWorley(c * 3.4 + seed * 2.0) * 7.0);
-  crack *= (1.0 - smoothstep(0.30, 0.86, r)) * (1.0 - hole);
-  float halo = exp(-r * 3.2) * (0.35 + 0.75 * fxFbm(c * 4.0 + 11.0, 4)) * 0.55;
+  // Short radial hairlines only — long spidery legs read as a decal, not as
+  // spalled concrete.
+  float crack = fxSat(1.0 - fxWorley(c * 5.2 + seed * 2.0) * 11.0);
+  crack *= (1.0 - smoothstep(0.16, 0.46, r)) * (1.0 - hole);
+  float halo = exp(-r * 4.4) * (0.35 + 0.75 * fxFbm(c * 4.0 + 11.0, 4)) * 0.45;
 
   float v = 0.5;
-  v = mix(v, 0.86, fxSat(spall));
-  v = mix(v, 0.30, fxSat(halo * 0.7));
-  v = mix(v, 0.32, fxSat(crack * 0.8));
-  v = mix(v, 0.035, hole);
-  float cov = fxSat(hole + spall * 0.9 + halo * 0.75 + crack * 0.55);
+  v = mix(v, 1.00, fxSat(spall * 1.15));
+  v = mix(v, 0.34, fxSat(halo * 0.6));
+  v = mix(v, 0.30, fxSat(crack * 0.7));
+  v = mix(v, 0.030, hole);
+  float cov = fxSat(hole + spall * 1.05 + halo * 0.6 + crack * 0.45);
   return vec4(vec3(v * 1.0, v * 0.99, v * 0.97), cov * smoothstep(1.0, 0.80, r));
 }
 

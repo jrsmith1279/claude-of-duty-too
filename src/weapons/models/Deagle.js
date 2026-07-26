@@ -167,5 +167,5 @@ export function buildDeagle(resolve) {
   nodes.gripFront.position.set(-0.0180, -0.0700, 0.0250);
   root.add(nodes.gripFront);
 
-  return { root, parts, nodes, tris: countTris(root) };
+  return { root, parts, nodes, tris: countTris(root), gripRadius: 0.018, noSupportHand: true };
 }

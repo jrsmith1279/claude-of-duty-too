@@ -247,5 +247,5 @@ export function buildMP5(resolve) {
   nodes.gripFront.position.set(0, -0.0060, -0.1720);
   root.add(nodes.gripFront);
 
-  return { root, parts, nodes, tris: countTris(root) };
+  return { root, parts, nodes, tris: countTris(root), gripRadius: 0.0195 };
 }

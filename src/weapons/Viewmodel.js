@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Spring1, Spring3, ValueNoise, clamp, lerp, smoothstep, easeOutCubic, easeOutBack, approach, deg } from './Springs.js';
 import { buildWeaponModel } from './models/index.js';
+import { buildHands } from './models/Hands.js';
 
 /**
  * The viewmodel rig: everything between "a pile of meshes" and "a weapon that
@@ -151,7 +152,7 @@ export class Viewmodel {
       this.root.add(m.root);
       this.models.set(id, m);
       m.adsPose = this._solveADS(m, def);
-      m.restPos = m.parts.magazine ? m.parts.magazine.group.position.clone() : new THREE.Vector3();
+      this._attachHands(m);
     }
     if (this.model && this.model !== m) this.model.root.visible = false;
     this.model = m;
@@ -161,6 +162,22 @@ export class Viewmodel {
     this.boltT = 1;
     this.reload = null;
     return m;
+  }
+
+  /**
+   * Parent a pair of gloved hands to the model's grip nodes. Every weapon
+   * publishes `gripRear`/`gripFront` in the right place, so the hands come for
+   * free and land correctly without per-weapon authoring.
+   */
+  _attachHands(m) {
+    if (!m.nodes.gripRear || m.hands) return;
+    const h = buildHands(this.resolve, { gripRadius: m.gripRadius ?? 0.0218 });
+    m.nodes.gripRear.add(h.rear);
+    if (m.nodes.gripFront && !m.noSupportHand) m.nodes.gripFront.add(h.front);
+    m.hands = h;
+    // Registered as parts so the rig can animate them like anything else.
+    m.parts.handRear = { group: h.rear };
+    m.parts.handFront = { group: h.front };
   }
 
   /**
@@ -414,6 +431,19 @@ export class Viewmodel {
       const target = this.chargeT;
       p.chargingHandle.group.position.z = 0.052 * target;
       this.chargeT = Math.max(0, this.chargeT - dt / 0.16);
+    }
+
+    // The support hand leaves the handguard to fetch and seat the magazine.
+    if (p.handFront) {
+      const r = this.reload;
+      let u = 0;
+      if (r) {
+        const t = r.t / r.dur;
+        u = t < 0.10 ? t / 0.10 : t > 0.80 ? Math.max(0, (0.95 - t) / 0.15) : 1;
+      }
+      const g = p.handFront.group;
+      g.position.set(0.012 * u, -0.105 * u, 0.205 * u);
+      g.rotation.set(-0.55 * u, 0.30 * u, 0.20 * u);
     }
 
     // Selector rotates to the current fire mode.

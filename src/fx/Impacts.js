@@ -142,7 +142,7 @@ export class Impacts {
         this.decals.add(point, _n, 'spall', 0.55 + Math.random() * 0.4, 0.55);
       }
     }
-    this.ctx.audio?.playAt?.(def.sound, point, { gain: Math.min(1, 0.45 + e * 0.3) });
+    if (def.sound) this.ctx.audio?.playAt?.(def.sound, point, { gain: Math.min(1, 0.45 + e * 0.3) });
   }
 
   // ------------------------------------------------------------- signatures
@@ -155,26 +155,29 @@ export class Impacts {
       const big = i === 0;
       this._cone(big ? 0.35 : 0.8);
       const sp = big ? rnd(0.5, 0.9) : rnd(1.2, 2.4);
-      s.x = point.x + _n.x * 0.04; s.y = point.y + _n.y * 0.04; s.z = point.z + _n.z * 0.04;
+      // Stand the puff off the surface: it is a cloud coming *out* of the wall,
+      // and a billboard centred on the wall plane is half-buried in it.
+      const off = big ? 0.16 : 0.10;
+      s.x = point.x + _n.x * off; s.y = point.y + _n.y * off; s.z = point.z + _n.z * off;
       s.vx = _v.x * sp; s.vy = _v.y * sp + 0.35; s.vz = _v.z * sp;
-      s.life = big ? rnd(1.1, 1.5) * e : rnd(0.5, 0.8);
-      s.drag = big ? 2.6 : 3.4;
+      s.life = big ? rnd(0.85, 1.25) * e : rnd(0.4, 0.7);
+      s.drag = big ? 2.8 : 3.6;
       s.gravity = -0.7;
-      s.size0 = big ? 0.10 * e : 0.05;
-      s.size1 = big ? rnd(0.85, 1.25) * e : rnd(0.30, 0.5);
+      s.size0 = big ? 0.07 * e : 0.035;
+      s.size1 = big ? rnd(0.42, 0.62) * e : rnd(0.16, 0.28);
       s.tile = big ? PT.DUST : PT.SMOKE_A + ((Math.random() * 3) | 0);
-      s.turb = 0.10;
-      s.soft = 0.5;
+      s.turb = 0.12;
+      s.soft = 0.55;
       s.rot = Math.random() * 6.28; s.rotSpeed = rnd(-1.1, 1.1);
       s.r0 = def.dust[0]; s.g0 = def.dust[1]; s.b0 = def.dust[2];
       s.r1 = def.dust[0] * 0.88; s.g1 = def.dust[1] * 0.88; s.b1 = def.dust[2] * 0.9;
-      s.a0 = big ? 0.62 : 0.42; s.a1 = 0;
-      s.fadeIn = 0.05; s.fadeOut = 0.55;
+      s.a0 = big ? 0.70 : 0.48; s.a1 = 0;
+      s.fadeIn = 0.04; s.fadeOut = 0.55;
       lit.spawn(s);
     }
 
     // Chips: spinning angular fragments on real ballistic arcs.
-    const chips = Math.round(rnd(5, 9) * e);
+    const chips = Math.round(rnd(4, 7) * e);
     for (let i = 0; i < chips; i++) {
       const s = resetSpec();
       this._cone(0.85);
@@ -183,7 +186,7 @@ export class Impacts {
       s.vx = _v.x * sp; s.vy = _v.y * sp + rnd(0.4, 1.6); s.vz = _v.z * sp;
       s.life = rnd(0.6, 1.25);
       s.drag = 0.55; s.gravity = -11.5;
-      s.size0 = rnd(0.012, 0.045); s.size1 = s.size0;
+      s.size0 = rnd(0.010, 0.032); s.size1 = s.size0;
       s.tile = PT.CHIP;
       s.rot = Math.random() * 6.28; s.rotSpeed = rnd(-14, 14);
       s.soft = 0.12;
@@ -199,8 +202,8 @@ export class Impacts {
       const s = resetSpec();
       s.x = point.x + _n.x * 0.03; s.y = point.y + _n.y * 0.03; s.z = point.z + _n.z * 0.03;
       s.life = 0.055; s.drag = 0; s.gravity = 0;
-      s.size0 = 0.13 * e; s.size1 = 0.22 * e;
-      s.tile = PT.SOFT; s.soft = 0.2;
+      s.size0 = 0.10 * e; s.size1 = 0.17 * e;
+      s.tile = PT.SOFT; s.soft = 0.5;
       s.r0 = 2.6; s.g0 = 1.9; s.b0 = 1.0; s.a0 = 0.85;
       s.r1 = 1.4; s.g1 = 0.7; s.b1 = 0.2; s.a1 = 0;
       s.fadeIn = 0.02; s.fadeOut = 0.7;
@@ -246,10 +249,10 @@ export class Impacts {
     for (let i = 0; i < 2; i++) {
       const s = resetSpec();
       this._cone(0.5);
-      s.x = point.x + _n.x * 0.05; s.y = point.y + _n.y * 0.05; s.z = point.z + _n.z * 0.05;
+      s.x = point.x + _n.x * 0.13; s.y = point.y + _n.y * 0.13; s.z = point.z + _n.z * 0.13;
       s.vx = _v.x * 0.8; s.vy = _v.y * 0.8 + 0.6; s.vz = _v.z * 0.8;
       s.life = rnd(0.5, 0.85); s.drag = 3.0; s.gravity = -0.4;
-      s.size0 = 0.05; s.size1 = rnd(0.28, 0.45);
+      s.size0 = 0.04; s.size1 = rnd(0.18, 0.30);
       s.tile = PT.SMOKE_B; s.turb = 0.12; s.soft = 0.4;
       s.rot = Math.random() * 6.28; s.rotSpeed = rnd(-1.4, 1.4);
       s.r0 = def.dust[0]; s.g0 = def.dust[1]; s.b0 = def.dust[2];
@@ -323,10 +326,10 @@ export class Impacts {
     for (let i = 0; i < 2; i++) {
       const s = resetSpec();
       this._cone(0.55);
-      s.x = point.x + _n.x * 0.04; s.y = point.y + _n.y * 0.04; s.z = point.z + _n.z * 0.04;
+      s.x = point.x + _n.x * 0.13; s.y = point.y + _n.y * 0.13; s.z = point.z + _n.z * 0.13;
       s.vx = _v.x * 0.9; s.vy = _v.y * 0.9 + 0.4; s.vz = _v.z * 0.9;
       s.life = rnd(0.6, 1.0); s.drag = 3.2; s.gravity = -0.6;
-      s.size0 = 0.06; s.size1 = rnd(0.32, 0.55);
+      s.size0 = 0.045; s.size1 = rnd(0.22, 0.38);
       s.tile = PT.DUST; s.turb = 0.1; s.soft = 0.45;
       s.rot = Math.random() * 6.28; s.rotSpeed = rnd(-1, 1);
       s.r0 = def.dust[0]; s.g0 = def.dust[1]; s.b0 = def.dust[2];
@@ -344,15 +347,15 @@ export class Impacts {
       const big = i < 2;
       this._cone(big ? 0.45 : 0.95);
       const sp = big ? rnd(1.0, 2.2) : rnd(2.0, 4.5);
-      s.x = point.x + _n.x * 0.05; s.y = point.y + _n.y * 0.05; s.z = point.z + _n.z * 0.05;
+      s.x = point.x + _n.x * 0.14; s.y = point.y + _n.y * 0.14; s.z = point.z + _n.z * 0.14;
       s.vx = _v.x * sp; s.vy = _v.y * sp + rnd(0.5, 1.6); s.vz = _v.z * sp;
-      s.life = big ? rnd(1.5, 2.2) * e : rnd(0.7, 1.2);
+      s.life = big ? rnd(1.2, 1.8) * e : rnd(0.6, 1.0);
       s.drag = big ? 2.0 : 3.0;
       s.gravity = -0.55;
-      s.size0 = big ? 0.12 * e : 0.06;
-      s.size1 = big ? rnd(1.1, 1.7) * e : rnd(0.4, 0.7);
+      s.size0 = big ? 0.09 * e : 0.045;
+      s.size1 = big ? rnd(0.60, 0.95) * e : rnd(0.24, 0.4);
       s.tile = big ? PT.DUST : PT.SMOKE_C;
-      s.turb = 0.20; s.soft = 0.55;
+      s.turb = 0.20; s.soft = 0.6;
       s.rot = Math.random() * 6.28; s.rotSpeed = rnd(-0.9, 0.9);
       s.r0 = def.dust[0]; s.g0 = def.dust[1]; s.b0 = def.dust[2];
       s.r1 = def.dust[0] * 0.9; s.g1 = def.dust[1] * 0.9; s.b1 = def.dust[2] * 0.92;
@@ -420,7 +423,7 @@ export class Impacts {
       s.x = point.x + _n.x * 0.03; s.y = point.y + _n.y * 0.03; s.z = point.z + _n.z * 0.03;
       s.vx = _v.x * sp; s.vy = _v.y * sp + 0.3; s.vz = _v.z * sp;
       s.life = rnd(0.4, 0.9); s.drag = 3.6; s.gravity = -1.2;
-      s.size0 = 0.05; s.size1 = rnd(0.22, 0.45);
+      s.size0 = 0.04; s.size1 = rnd(0.16, 0.32);
       s.tile = PT.DUST; s.soft = 0.4; s.turb = 0.1;
       s.rot = Math.random() * 6.28; s.rotSpeed = rnd(-1.5, 1.5);
       s.r0 = def.dust[0]; s.g0 = def.dust[1]; s.b0 = def.dust[2];

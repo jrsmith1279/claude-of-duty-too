@@ -472,20 +472,35 @@ export class DecalKit {
     return list[(rand() * list.length) | 0];
   }
 
-  /** Material overrides that turn any library key into a decal surface. */
+  /**
+   * Material overrides that turn a library key into a decal surface.
+   *
+   * There are two of these and the split is a performance decision, not an art
+   * one. A blended decal cannot write depth, so nothing behind it is ever
+   * rejected early and every pixel it covers runs the full standard shader
+   * again — including a three-cascade PCSS lookup at up to 24 taps. Measured on
+   * the interior preset, an eight-deep stack of blended wall decals cost 15 ms
+   * of a 16.6 ms budget on its own.
+   *
+   * So only the marks that genuinely need a soft edge stay blended (grime,
+   * streaking, dust, oil, scorch, standing water, mould). Everything with a
+   * hard edge — impacts, cracks, posters, tags, tyre tread — is alpha-tested
+   * and opaque, which puts it back in the depth-writing pass where the
+   * hardware rejects the overlap for free.
+   */
   overrides(blend) {
     return {
       map: this.texture,
-      transparent: true,
+      transparent: !!blend,
       opacity: 1,
-      depthWrite: false,
-      // Even a fully blended decal wants a threshold: the padded gutter around
-      // every atlas cell is pure alpha zero and discarding it early saves
-      // blending a transparent quad over a large part of the road.
-      alphaTest: blend ? 0.02 : 0.34,
+      depthWrite: !blend,
+      // Even a blended decal wants a threshold: the padded gutter around every
+      // atlas cell is pure alpha zero and discarding it early saves blending a
+      // transparent quad over a large part of the road.
+      alphaTest: blend ? 0.03 : 0.45,
       polygonOffset: true,
       polygonOffsetFactor: -3,
-      polygonOffsetUnits: -8,
+      polygonOffsetUnits: blend ? -8 : -12,
       normalScale: 0,
       roughness: 0.88,
       metalness: 0,
@@ -525,7 +540,7 @@ function tint(rand, v = 0.14, warm = 0) {
  * oil where vehicles stood, tyre tracks along the driving line, dust patches,
  * cracking and impact spray.
  */
-export function groundDecals(ctx, site, bs, kit, rand, density = 1) {
+export function groundDecals(ctx, site, soft, hard, kit, rand, density = 1) {
   if (!kit.texture) return { count: 0 };
   let count = 0;
   const N = (n) => Math.max(0, Math.round(n * density));
@@ -538,7 +553,7 @@ export function groundDecals(ctx, site, bs, kit, rand, density = 1) {
     (d > 12 || d < 2.2 ? 0 : 1) * (s === 'asphalt' || s === 'asphalt_worn' ? 1.6 : 0.4));
   if (nearWall.empty && anywhere.empty) return { count: 0 };
 
-  const put = (field, n, kind, wMin, wMax, aspect, v, warm) => {
+  const put = (field, n, kind, wMin, wMax, aspect, v, warm, bs) => {
     for (let i = 0; i < n; i++) {
       const p = field.sample(rand);
       if (!p) break;
@@ -552,19 +567,19 @@ export function groundDecals(ctx, site, bs, kit, rand, density = 1) {
   };
 
   // Dirt gravity along every wall base and kerb line.
-  put(nearWall, N(210), 'grimeBand', 1.2, 3.2, [0.5, 1.0], 0.16, 0.02);
-  put(nearWall, N(150), 'dust', 0.9, 2.8, [0.6, 1.1], 0.18, 0.1);
-  put(nearWall, N(90), 'wet', 0.7, 2.0, [0.5, 1.0], 0.12, -0.05);
+  put(nearWall, N(120), 'grimeBand', 1.0, 2.4, [0.5, 1.0], 0.16, 0.02, soft);
+  put(nearWall, N(80), 'dust', 0.8, 2.1, [0.6, 1.1], 0.18, 0.1, soft);
+  put(nearWall, N(40), 'wet', 0.6, 1.5, [0.5, 1.0], 0.12, -0.05, soft);
 
   // General surface history.
-  put(anywhere, N(190), 'dust', 1.0, 3.4, [0.55, 1.1], 0.2, 0.12);
-  put(anywhere, N(130), 'crackWeb', 0.9, 2.6, [0.7, 1.2], 0.14, 0.0);
-  put(anywhere, N(70), 'mould', 0.6, 1.7, [0.6, 1.1], 0.16, -0.04);
+  put(anywhere, N(95), 'dust', 0.9, 2.5, [0.55, 1.1], 0.2, 0.12, soft);
+  put(anywhere, N(130), 'crackWeb', 0.9, 2.6, [0.7, 1.2], 0.14, 0.0, hard);
+  put(anywhere, N(34), 'mould', 0.5, 1.4, [0.6, 1.1], 0.16, -0.04, soft);
 
   // Where vehicles stood and stopped.
-  put(midRoad, N(46), 'oil', 0.8, 2.3, [0.6, 1.0], 0.12, -0.02);
-  put(midRoad, N(58), 'scorch', 1.0, 3.0, [0.7, 1.1], 0.14, 0.02);
-  put(midRoad, N(80), 'impactSpray', 0.8, 2.2, [0.8, 1.2], 0.14, 0.03);
+  put(midRoad, N(34), 'oil', 0.7, 1.9, [0.6, 1.0], 0.12, -0.02, soft);
+  put(midRoad, N(26), 'scorch', 0.9, 2.3, [0.7, 1.1], 0.14, 0.02, soft);
+  put(midRoad, N(80), 'impactSpray', 0.8, 2.2, [0.8, 1.2], 0.14, 0.03, hard);
 
   return { count };
 }
@@ -574,7 +589,7 @@ export function groundDecals(ctx, site, bs, kit, rand, density = 1) {
  * of overlapping quads so they curve and fade instead of appearing as one
  * stretched sticker.
  */
-export function tyreTracks(ctx, site, bs, kit, rand, density = 1) {
+export function tyreTracks(ctx, site, bs, kit, rand, density = 1) {  // hard set
   if (!kit.texture || !site.facades.length) return { count: 0 };
   // The street runs along whatever the longest facade runs along.
   const f = site.facades[0];
@@ -624,11 +639,11 @@ export function tyreTracks(ctx, site, bs, kit, rand, density = 1) {
  * grime rising from the ground, rain streaking down from the parapet, impact
  * clusters at chest height, cracks, tags and torn bills.
  */
-export function wallDecals(ctx, site, bs, kit, rand, density = 1) {
+export function wallDecals(ctx, site, soft, hard, kit, rand, density = 1) {
   if (!kit.texture) return { count: 0 };
   let count = 0;
 
-  const put = (kind, x, y, z, nx, nz, w, h, v, warm) => {
+  const put = (bs, kind, x, y, z, nx, nz, w, h, v, warm) => {
     const geo = kit.geo(kind, rand);
     if (!geo) return;
     onWall(bs, 'gun_polymer', geo, x, y, z, nx, nz, w, h, tint(rand, v, warm));
@@ -643,29 +658,29 @@ export function wallDecals(ctx, site, bs, kit, rand, density = 1) {
     const at = (t, off) => [f.ax + ux * len * t + f.nx * off, f.az + uz * len * t + f.nz * off];
 
     // 1. Grime rising out of the ground — rule 4. A continuous band, not spots.
-    const bandN = Math.max(2, Math.round(len / 1.7 * density));
+    const bandN = Math.max(2, Math.round(len / 2.6 * density));
     for (let i = 0; i < bandN; i++) {
       const t = (i + 0.5) / bandN + (rand() - 0.5) * 0.3 / bandN;
       const [x, z] = at(THREE.MathUtils.clamp(t, 0, 1), 0);
       const bw = len / bandN * 1.9;
       const bh = 0.7 + rand() * 1.5;
-      put('grimeBand', x, f.base + bh * 0.5, z, f.nx, f.nz, bw, bh, 0.14, 0.03);
+      put(soft, 'grimeBand', x, f.base + bh * 0.5, z, f.nx, f.nz, bw, bh, 0.14, 0.03);
     }
 
     // 2. Rain running down off the top of the wall.
-    const streakN = Math.round(len * 0.55 * density);
+    const streakN = Math.round(len * 0.3 * density);
     for (let i = 0; i < streakN; i++) {
       const [x, z] = at(rand(), 0);
       const sh = Math.min(h * (0.3 + rand() * 0.55), 7);
-      put('streak', x, f.top - sh * 0.5 - rand() * 0.4, z, f.nx, f.nz,
-        0.9 + rand() * 2.4, sh, 0.12, 0.0);
+      put(soft, 'streak', x, f.top - sh * 0.5 - rand() * 0.4, z, f.nx, f.nz,
+        0.7 + rand() * 1.5, sh, 0.12, 0.0);
     }
     // and a second, shorter set starting part-way down, off ledges.
-    for (let i = 0; i < Math.round(streakN * 0.7); i++) {
+    for (let i = 0; i < Math.round(streakN * 0.5); i++) {
       const [x, z] = at(rand(), 0);
       const y0 = f.base + 1.5 + rand() * Math.max(0.5, h - 3);
       const sh = 0.8 + rand() * 2.4;
-      put(rand() < 0.5 ? 'drip' : 'streak', x, y0 - sh * 0.5, z, f.nx, f.nz,
+      put(soft, rand() < 0.5 ? 'drip' : 'streak', x, y0 - sh * 0.5, z, f.nx, f.nz,
         0.35 + rand() * 1.2, sh, 0.12, 0.0);
     }
 
@@ -678,7 +693,7 @@ export function wallDecals(ctx, site, bs, kit, rand, density = 1) {
         const [x, z] = at(THREE.MathUtils.clamp(t + (rand() - 0.5) * 0.08, 0, 1), 0);
         const kind = rand() < 0.45 ? 'impactCluster' : rand() < 0.6 ? 'impactSpray' : 'impact';
         const w = kind === 'impact' ? 0.16 + rand() * 0.14 : 0.7 + rand() * 1.5;
-        put(kind, x, y0 + (rand() - 0.5) * 0.9, z, f.nx, f.nz, w, w * (0.8 + rand() * 0.5), 0.1, 0.02);
+        put(hard, kind, x, y0 + (rand() - 0.5) * 0.9, z, f.nx, f.nz, w, w * (0.8 + rand() * 0.5), 0.1, 0.02);
       }
     }
 
@@ -688,7 +703,7 @@ export function wallDecals(ctx, site, bs, kit, rand, density = 1) {
       const [x, z] = at(rand(), 0);
       const y = f.base + Math.pow(rand(), 1.7) * (h - 0.6) + 0.3;
       const w = 0.7 + rand() * 2.2;
-      put('crackWeb', x, y, z, f.nx, f.nz, w, w * (0.7 + rand() * 0.8), 0.1, 0.0);
+      put(hard, 'crackWeb', x, y, z, f.nx, f.nz, w, w * (0.7 + rand() * 0.8), 0.1, 0.0);
     }
 
     // 5. Human traces, only at reachable height.
@@ -696,22 +711,22 @@ export function wallDecals(ctx, site, bs, kit, rand, density = 1) {
     for (let i = 0; i < tags; i++) {
       const [x, z] = at(rand(), 0);
       const w = 1.0 + rand() * 2.4;
-      put(rand() < 0.5 ? 'tagA' : 'tagB', x, f.base + 0.9 + rand() * 1.2, z, f.nx, f.nz,
+      put(hard, rand() < 0.5 ? 'tagA' : 'tagB', x, f.base + 0.9 + rand() * 1.2, z, f.nx, f.nz,
         w, w * (0.42 + rand() * 0.24), 0.08, 0);
     }
     const bills = Math.round(len * 0.13 * density);
     for (let i = 0; i < bills; i++) {
       const [x, z] = at(rand(), 0);
       const bw = 0.35 + rand() * 0.5;
-      put('poster', x, f.base + 1.1 + rand() * 1.3, z, f.nx, f.nz, bw, bw * (1.2 + rand() * 0.5), 0.1, 0.02);
+      put(hard, 'poster', x, f.base + 1.1 + rand() * 1.3, z, f.nx, f.nz, bw, bw * (1.2 + rand() * 0.5), 0.1, 0.02);
     }
 
     // 6. Mould and water damage low down and in shade.
-    const damp = Math.round(len * 0.22 * density);
+    const damp = Math.round(len * 0.12 * density);
     for (let i = 0; i < damp; i++) {
       const [x, z] = at(rand(), 0);
       const w = 0.6 + rand() * 1.6;
-      put(rand() < 0.6 ? 'mould' : 'dust', x, f.base + 0.3 + rand() * 2.2, z, f.nx, f.nz,
+      put(soft, rand() < 0.6 ? 'mould' : 'dust', x, f.base + 0.3 + rand() * 2.2, z, f.nx, f.nz,
         w, w * (0.7 + rand() * 0.9), 0.14, 0.04);
     }
   }

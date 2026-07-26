@@ -25,6 +25,17 @@ const _v0 = new THREE.Vector3();
 const _v1 = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _dir = new THREE.Vector3();
+const _v3 = new THREE.Vector3();
+const _stagePos = new THREE.Vector3();
+const _stageAim = new THREE.Vector3();
+const UP_Y = new THREE.Vector3(0, 1, 0);
+
+/**
+ * The `combat` camera preset from `tools/shoot.mjs`. Staging is authored
+ * relative to this rather than in world coordinates so it survives the level
+ * being rebuilt underneath it.
+ */
+const STAGE_CAM = { pos: [6, 1.7, 6], look: [-8, 1.6, -12] };
 
 export class AISystem {
   constructor() {
@@ -321,40 +332,95 @@ export class AISystem {
     this.clear();
     const out = [];
 
-    const poses = opts.poses || [
-      { // near left, crouched behind the jersey barrier, covering down-street
-        pos: [-3.95, 0, 3.3], yaw: Math.PI * 0.94, aim: [-6.5, 1.25, -22],
-        crouch: 1, speed: 0, aiming: 1, stride: 0.30,
-      },
-      { // mid street, advancing across the frame, weapon up
-        pos: [-1.0, 0, -8.6], yaw: -2.05, aim: [-13.5, 1.45, -14],
-        crouch: 0, speed: 1.9, aiming: 1, stride: 0.78, lift: 0.14,
-      },
-      { // far corner of the west block, shouldered back toward the camera
-        pos: [-8.9, 0, -13.6], yaw: 0.62, aim: [4.5, 1.55, 3.0],
-        crouch: 0, speed: 0, aiming: 1, stride: 0.34,
-      },
+    // Authored in CAMERA space — depth down the view axis and lateral offset —
+    // not in world coordinates. The level is still being rebuilt around this
+    // and a world-space pose list would be pointing at whatever used to be
+    // there. Depth ladder: near/left, mid/centre, far/centre.
+    const cam = opts.camera || STAGE_CAM;
+    const eye = _v0.set(cam.pos[0], cam.pos[1], cam.pos[2]);
+    const fwd = _v1.set(cam.look[0] - cam.pos[0], 0, cam.look[2] - cam.pos[2]).normalize();
+    const right = _v2.set(-fwd.z, 0, fwd.x);
+
+    const plan = opts.plan || [
+      { depth: 9.0, side: -3.0, crouch: 1, speed: 0, stride: 0.30, face: 0.15, aimUp: 1.15 },
+      { depth: 13.5, side: 1.4, crouch: 0, speed: 1.9, stride: 0.80, lift: 0.15, face: -1.15, aimUp: 1.45 },
+      { depth: 19.5, side: -1.8, crouch: 0, speed: 0, stride: 0.36, face: Math.PI, aimUp: 1.55 },
     ];
 
-    for (const pose of poses) {
-      const bot = this.spawn('b', _v0.set(pose.pos[0], pose.pos[1], pose.pos[2]), pose.yaw);
+    for (const p of plan) {
+      if (!this._stageSpot(eye, fwd, right, p, _stagePos)) continue;
+      // `face` is a yaw relative to the camera's view direction: 0 looks the
+      // same way the camera does, PI looks back down the barrel at it.
+      const camYaw = Math.atan2(fwd.x, fwd.z);
+      const yaw = camYaw + p.face;
+      const bot = this.spawn('b', _stagePos, yaw);
       if (!bot) break;
-      this._freezePose(bot, pose, ctx);
+      _stageAim.set(
+        bot.position.x + Math.sin(yaw) * 18,
+        bot.position.y + p.aimUp,
+        bot.position.z + Math.cos(yaw) * 18,
+      );
+      this._freezePose(bot, p, _stageAim, ctx);
       out.push(bot);
     }
-    // Two frames of solving settles the springs; the harness then waits 1.6 s.
+    // Settle the springs before the shutter; the harness then waits 1.6 s more.
     for (let i = 0; i < 90; i++) for (const b of out) b.update(1 / 60, ctx, this.contacts);
     return out;
   }
 
-  _freezePose(bot, pose, ctx) {
+  /**
+   * Turn a camera-relative slot into a world position that is on the ground,
+   * out of the walls and actually visible from the camera. A staged bot inside
+   * a building is worse than no bot at all.
+   */
+  _stageSpot(eye, fwd, right, p, out) {
+    const phys = this.ctx?.physics;
+    const nudges = [0, 1.3, -1.3, 2.6, -2.6, 4.2, -4.2];
+    for (let i = 0; i < nudges.length; i++) {
+      out.copy(eye).addScaledVector(fwd, p.depth).addScaledVector(right, p.side + nudges[i]);
+      out.y = this._groundY(out.x, out.z, eye.y - 1.7);
+      // Chest height, since that is what has to be seen.
+      _v3.copy(out); _v3.y += p.crouch ? 0.95 : 1.35;
+      if (!phys?.raycast) return true;
+      _dir.copy(_v3).sub(eye);
+      const d = _dir.length();
+      if (d < 1e-3) continue;
+      _dir.multiplyScalar(1 / d);
+      const hit = phys.raycast(eye, _dir, d - 0.45, MASK_WORLD);
+      if (hit) continue;                       // something is in the way
+      // And there must be room to stand: nothing directly overhead.
+      _v3.copy(out); _v3.y += 0.4;
+      if (phys.raycast(_v3, UP_Y, 1.4, MASK_WORLD)) continue;
+      // Prefer standing next to real cover when one is close by.
+      if (p.crouch) this._snapToCover(out, 4.5);
+      return true;
+    }
+    return false;
+  }
+
+  _snapToCover(pos, maxDist) {
+    const points = this.ctx?.level?.coverPoints;
+    if (!points?.length) return;
+    let best = null, bestD = maxDist * maxDist;
+    for (const cp of points) {
+      if (!cp?.position) continue;
+      const d = cp.position.distanceToSquared(pos);
+      if (d < bestD) { bestD = d; best = cp; }
+    }
+    if (!best) return;
+    pos.copy(best.position);
+    if (best.normal) pos.addScaledVector(best.normal, -0.5);
+    pos.y = this._groundY(pos.x, pos.z, pos.y);
+  }
+
+  _freezePose(bot, pose, aim, ctx) {
     bot.frozen = true;
     bot.anim.frozen = true;
     bot.crouch = pose.crouch ?? 0;
     bot.aiming = pose.aiming ?? 1;
     bot.speed = pose.speed ?? 0;
     bot.wantFire = false;
-    bot.aimPoint.set(pose.aim[0], pose.aim[1], pose.aim[2]);
+    bot.aimPoint.copy(aim);
     _v1.copy(bot.aimPoint).sub(bot.position);
     bot.aimYaw = Math.atan2(_v1.x, _v1.z);
     bot.velocity.set(Math.sin(bot.yaw) * bot.speed, 0, Math.cos(bot.yaw) * bot.speed);

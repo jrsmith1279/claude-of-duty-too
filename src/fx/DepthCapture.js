@@ -22,7 +22,7 @@ import * as THREE from 'three';
  * (props, vegetation, bots) land in the right place.
  */
 
-const FAR = 95;
+const FAR = 62;
 const SCALE = 0.25;
 const CLEAR = new THREE.Color(1e4, 0, 0);
 
@@ -87,7 +87,10 @@ export class DepthCapture {
     this.height = h;
     this.rt = new THREE.WebGLRenderTarget(w, h, {
       format: THREE.RGBAFormat,
-      type: THREE.HalfFloatType,
+      // Full float, not half: the comparison is `sceneDepth - particleDepth`
+      // over centimetres at tens of metres, and half float has ~8 mm of
+      // mantissa at 20 m — enough to erase every impact puff on a wall.
+      type: THREE.FloatType,
       minFilter: THREE.LinearFilter,
       magFilter: THREE.LinearFilter,
       depthBuffer: true,
@@ -116,7 +119,9 @@ export class DepthCapture {
     const still =
       this._prevCam.distanceToSquared(cam.position) < 1e-6 &&
       Math.abs(this._prevQuat.dot(cam.quaternion)) > 0.999995;
-    if (still && this.frame > 1) return this.rt.texture;
+    // Still camera: reuse forever. Moving camera: every other frame, which
+    // halves the average draw-call cost and is a sub-pixel error at 1/4 res.
+    if (this.frame > 1 && (still || (this.frame & 1))) return this.rt.texture;
     this._prevCam.copy(cam.position);
     this._prevQuat.copy(cam.quaternion);
 

@@ -62,7 +62,7 @@ void main(){
   side = sl > 1e-4 ? side / sl : vec3(1.0, 0.0, 0.0);
 
   // Never let a self-luminous round thin below a couple of pixels.
-  float w = max(tC.y, dist * 0.0022);
+  float w = max(tC.y, dist * 0.0013);
   p += side * (position.x * w);
 
   vQ = vec2(position.x * 2.0, py);
@@ -83,12 +83,14 @@ varying float vFade;
 
 void main(){
   float x = clamp(1.0 - abs(vQ.x), 0.0, 1.0);
-  float core = pow(x, 7.0);
-  float glow = pow(x, 1.7) * 0.30;
+  // A hard thin core inside a soft halo. A single smooth falloff across the
+  // ribbon reads as a light sabre; the round itself has to be a filament.
+  float core = pow(x, 14.0);
+  float glow = pow(x, 3.2) * 0.16;
   float along = clamp(vQ.y, 0.0, 1.0);
-  float tail = pow(along, 2.4);
-  float headPop = pow(clamp((along - 0.84) / 0.16, 0.0, 1.0), 1.4);
-  float a = (core + glow) * (0.08 + 0.92 * tail) + headPop * core * 1.5;
+  float tail = pow(along, 3.2);
+  float headPop = pow(clamp((along - 0.90) / 0.10, 0.0, 1.0), 1.2);
+  float a = (core + glow) * (0.03 + 0.97 * tail) + headPop * (core * 1.2 + 0.35);
   a *= vFade;
   if (a < 0.003) discard;
   vec3 col = mix(vCol * vec3(1.0, 0.62, 0.26), vCol, min(1.0, core * 1.3 + headPop));
@@ -164,7 +166,7 @@ export class Tracers {
     this.head = (this.head + 1) % this.capacity;
     if (this.used < this.capacity) this.used++;
     const o = i * 4;
-    const trail = opts?.trail ?? Math.min(9, 2.6 + v * 0.006);
+    const trail = opts?.trail ?? Math.min(4.6, 1.4 + v * 0.0032);
     // `age` back-dates the birth so a staged tableau can freeze a round
     // mid-flight instead of at the muzzle.
     const birth = this.time - (opts?.age ?? 0);
@@ -173,7 +175,7 @@ export class Tracers {
     const b = this.data.tB; b[o] = _dir.x; b[o + 1] = _dir.y; b[o + 2] = _dir.z; b[o + 3] = v;
     const c = this.data.tC;
     c[o] = trail;
-    c[o + 1] = opts?.width ?? 0.035;
+    c[o + 1] = opts?.width ?? 0.018;
     c[o + 2] = flight + (trail / v) + 0.02;
     c[o + 3] = dist;
     const d = this.data.tD;
@@ -181,7 +183,7 @@ export class Tracers {
     d[o] = col ? col[0] : 1.0;
     d[o + 1] = col ? col[1] : 0.80;
     d[o + 2] = col ? col[2] : 0.38;
-    d[o + 3] = opts?.intensity ?? 9.0;
+    d[o + 3] = opts?.intensity ?? 5.5;
 
     const expiry = birth + c[o + 2];
     if (expiry > this.maxExpiry) this.maxExpiry = expiry;
