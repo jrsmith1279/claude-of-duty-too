@@ -628,6 +628,7 @@ export class FXSystem {
     if (groundHit) {
       _p.copy(groundHit.point);
       const col = this.smoke.column(_p, {
+        sunVis: this.impacts.sunVisibility(_p, groundHit.normal),
         rate: 9, duration: 60, radius: 0.45, rise: 2.6, spread: 0.38,
         size0: 0.5, size1: 3.1, life: 5.0, alpha: 0.72, lifeVar: 0.5,
         drag: 0.42, gravity: 0.42, turb: 0.70, fadeOut: 0.4,
@@ -642,7 +643,7 @@ export class FXSystem {
     // already spread out rather than emerging from a point.
     _v.copy(camPos).addScaledVector(_fwd, 15).addScaledVector(_right, -1.5);
     _v.y = camPos.y - 0.9;
-    const haze = this.smoke.haze(_v, { rate: 3, duration: 60, radius: 3.6, alpha: 0.085, life: 10, size1: 3.4 });
+    const haze = this.smoke.haze(_v, { sunVis: this.impacts.sunVisibility(_v, null), rate: 3, duration: 60, radius: 3.6, alpha: 0.085, life: 10, size1: 3.4 });
     this.smoke.prime(haze, 7, 34);
 
     // Foreground dust hanging low over the road: the bottom of a combat frame
@@ -651,6 +652,7 @@ export class FXSystem {
     if (G.hit) {
       _v.copy(G.point).addScaledVector(_fwd, -2.0).addScaledVector(_up, 0.35);
       const near = this.smoke.haze(_v, {
+        sunVis: this.impacts.sunVisibility(_v, null),
         rate: 3, duration: 60, radius: 2.6, alpha: 0.075, life: 9,
         size0: 0.9, size1: 3.0, rise: 0.22, spread: 0.5, turb: 0.22,
         r0: 0.50, g0: 0.455, b0: 0.40, r1: 0.60, g1: 0.565, b1: 0.52,
@@ -666,9 +668,11 @@ export class FXSystem {
         .addScaledVector(_right, (Math.random() - 0.5) * d * 0.55)
         .addScaledVector(_up, (Math.random() - 0.35) * d * 0.22);
       const px = _p.x, py = _p.y, pz = _p.z;
+      const sunVisMote = this.impacts.sunVisibility(_p, null);
       const size = 0.010 + Math.random() * 0.030 * (d / 12);
       this._at(2 + Math.random() * 6, () => {
         const s = resetSpec();
+        s.sunVis = sunVisMote;
         s.x = px; s.y = py; s.z = pz;
         s.vx = (Math.random() - 0.5) * 0.12;
         s.vy = (Math.random() - 0.3) * 0.08;

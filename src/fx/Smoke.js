@@ -37,6 +37,7 @@ function makeEmitter() {
     r1: 0.52, g1: 0.51, b1: 0.50,
     tile: -1,
     soft: 0.9,
+    sunVis: 1,
   };
 }
 
@@ -51,11 +52,12 @@ export class Smoke {
   _acquire() {
     let oldest = null;
     for (const e of this.pool) {
-      if (!e.active) { e.active = true; e.age = 0; e.accum = 0; return e; }
+      if (!e.active) { e.active = true; e.age = 0; e.accum = 0; e.sunVis = 1; return e; }
       if (!oldest || e.age > oldest.age) oldest = e;
     }
     oldest.age = 0;
     oldest.accum = 0;
+    oldest.sunVis = 1;
     return oldest;
   }
 
@@ -119,6 +121,7 @@ export class Smoke {
     const n = opts?.count ?? 4;
     for (let i = 0; i < n; i++) {
       const s = resetSpec();
+      s.sunVis = opts?.sunVis ?? 1;
       const a = Math.random() * Math.PI * 2;
       const r = Math.random() * (opts?.radius ?? 0.25);
       s.x = pos.x + Math.cos(a) * r;
@@ -168,6 +171,7 @@ export class Smoke {
 
   _emit(e, birthOffset) {
     const s = resetSpec();
+    s.sunVis = e.sunVis;
     const t = e.duration > 0 ? Math.min(1, e.age / Math.max(e.ramp, 1e-3)) : 1;
     const a = Math.random() * Math.PI * 2;
     const r = Math.sqrt(Math.random()) * e.radius;

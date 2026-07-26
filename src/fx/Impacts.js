@@ -88,6 +88,7 @@ const FAMILY = {
   flesh: { dust: [0.34, 0.06, 0.05], chip: [0.28, 0.04, 0.035], decal: null, sound: null },
 };
 
+const _sun = new THREE.Vector3();
 const rnd = (a, b) => a + Math.random() * (b - a);
 
 export class Impacts {
@@ -97,6 +98,7 @@ export class Impacts {
     this.add = add;
     this.decals = decals;
     this.sparkBounces = true;
+    this.sunVis = 1;
   }
 
   /** Builds a tangent frame around a surface normal. */
@@ -118,10 +120,27 @@ export class Impacts {
     return _v;
   }
 
+  /**
+   * One ray at the sun per effect, not per particle: is this spot in the light?
+   * Everything the effect spawns inherits the answer through `SPEC.sunVis`.
+   */
+  sunVisibility(point, normal) {
+    const dir = this.ctx.lighting?.sunDirection || this.ctx.sky?.sunDirection;
+    const phys = this.ctx.physics;
+    if (!dir || !phys?.raycast || dir.y <= 0.02) return 1;
+    _sun.copy(dir).normalize();
+    _p.set(point.x, point.y, point.z);
+    if (normal) _p.addScaledVector(normal, 0.06);
+    _p.y += 0.02;
+    return phys.raycast(_p, _sun, 70, 1 | 2) ? 0.16 : 1;
+  }
+
   impact(point, normal, surfaceKey, energy = 1) {
     const fam = surfaceFamily(surfaceKey);
     const e = THREE.MathUtils.clamp(energy || 1, 0.25, 3);
     this._frame(normal);
+    SPEC.sunVis = this.sunVisibility(point, _n);
+    this.sunVis = SPEC.sunVis;
     const def = FAMILY[fam] || FAMILY.concrete;
 
     switch (fam) {
@@ -151,7 +170,7 @@ export class Impacts {
     const lit = this.lit;
     // Dust: one broad puff plus two small satellites so the plume has structure.
     for (let i = 0; i < 3; i++) {
-      const s = resetSpec();
+      const s = resetSpec(); s.sunVis = this.sunVis;
       const big = i === 0;
       this._cone(big ? 0.35 : 0.8);
       const sp = big ? rnd(0.5, 0.9) : rnd(1.2, 2.4);
@@ -179,7 +198,7 @@ export class Impacts {
     // Chips: spinning angular fragments on real ballistic arcs.
     const chips = Math.round(rnd(4, 7) * e);
     for (let i = 0; i < chips; i++) {
-      const s = resetSpec();
+      const s = resetSpec(); s.sunVis = this.sunVis;
       this._cone(0.85);
       const sp = rnd(2.5, 8.5);
       s.x = point.x + _n.x * 0.02; s.y = point.y + _n.y * 0.02; s.z = point.z + _n.z * 0.02;
@@ -199,7 +218,7 @@ export class Impacts {
     // A single frame of white-hot flash where the round vaporises: masonry does
     // not spark, but a jacketed round arriving at 800 m/s does flash.
     if (fam !== 'asphalt') {
-      const s = resetSpec();
+      const s = resetSpec(); s.sunVis = this.sunVis;
       s.x = point.x + _n.x * 0.03; s.y = point.y + _n.y * 0.03; s.z = point.z + _n.z * 0.03;
       s.life = 0.055; s.drag = 0; s.gravity = 0;
       s.size0 = 0.10 * e; s.size1 = 0.17 * e;
@@ -214,7 +233,7 @@ export class Impacts {
   _metal(point, def, e, thin) {
     const count = Math.round(rnd(10, 18) * e);
     for (let i = 0; i < count; i++) {
-      const s = resetSpec();
+      const s = resetSpec(); s.sunVis = this.sunVis;
       this._cone(0.95);
       const sp = rnd(4, 15) * (thin ? 0.85 : 1);
       s.x = point.x + _n.x * 0.02; s.y = point.y + _n.y * 0.02; s.z = point.z + _n.z * 0.02;
@@ -235,7 +254,7 @@ export class Impacts {
     }
 
     // Impact flash and a thin wisp of scorched-metal smoke.
-    const f = resetSpec();
+    const f = resetSpec(); f.sunVis = this.sunVis;
     f.x = point.x + _n.x * 0.03; f.y = point.y + _n.y * 0.03; f.z = point.z + _n.z * 0.03;
     f.life = 0.07; f.gravity = 0;
     f.size0 = 0.22 * e; f.size1 = 0.34 * e;
@@ -247,7 +266,7 @@ export class Impacts {
     this.add.spawn(f);
 
     for (let i = 0; i < 2; i++) {
-      const s = resetSpec();
+      const s = resetSpec(); s.sunVis = this.sunVis;
       this._cone(0.5);
       s.x = point.x + _n.x * 0.13; s.y = point.y + _n.y * 0.13; s.z = point.z + _n.z * 0.13;
       s.vx = _v.x * 0.8; s.vy = _v.y * 0.8 + 0.6; s.vz = _v.z * 0.8;
@@ -285,7 +304,7 @@ export class Impacts {
     const dot = _v.dot(_r);
     _v.addScaledVector(_r, -2 * dot).normalize();
 
-    const s = resetSpec();
+    const s = resetSpec(); s.sunVis = this.sunVis;
     s.x = hit.point.x + _r.x * 0.01;
     s.y = hit.point.y + _r.y * 0.01;
     s.z = hit.point.z + _r.z * 0.01;
@@ -307,7 +326,7 @@ export class Impacts {
   _wood(point, def, e) {
     const n = Math.round(rnd(6, 11) * e);
     for (let i = 0; i < n; i++) {
-      const s = resetSpec();
+      const s = resetSpec(); s.sunVis = this.sunVis;
       this._cone(1.0);
       const sp = rnd(2.0, 7.0);
       s.x = point.x + _n.x * 0.02; s.y = point.y + _n.y * 0.02; s.z = point.z + _n.z * 0.02;
@@ -324,7 +343,7 @@ export class Impacts {
       this.lit.spawn(s);
     }
     for (let i = 0; i < 2; i++) {
-      const s = resetSpec();
+      const s = resetSpec(); s.sunVis = this.sunVis;
       this._cone(0.55);
       s.x = point.x + _n.x * 0.13; s.y = point.y + _n.y * 0.13; s.z = point.z + _n.z * 0.13;
       s.vx = _v.x * 0.9; s.vy = _v.y * 0.9 + 0.4; s.vz = _v.z * 0.9;
@@ -343,7 +362,7 @@ export class Impacts {
     // No chips, no ring, no flash: soil absorbs. What sells it is the plume
     // continuing to grow and drift long after the round has gone.
     for (let i = 0; i < 4; i++) {
-      const s = resetSpec();
+      const s = resetSpec(); s.sunVis = this.sunVis;
       const big = i < 2;
       this._cone(big ? 0.45 : 0.95);
       const sp = big ? rnd(1.0, 2.2) : rnd(2.0, 4.5);
@@ -365,7 +384,7 @@ export class Impacts {
     }
     const grit = Math.round(rnd(5, 10) * e);
     for (let i = 0; i < grit; i++) {
-      const s = resetSpec();
+      const s = resetSpec(); s.sunVis = this.sunVis;
       this._cone(0.8);
       const sp = rnd(2.5, 7.5);
       s.x = point.x; s.y = point.y; s.z = point.z;
@@ -384,7 +403,7 @@ export class Impacts {
   _glass(point, def, e) {
     const n = Math.round(rnd(9, 15) * e);
     for (let i = 0; i < n; i++) {
-      const s = resetSpec();
+      const s = resetSpec(); s.sunVis = this.sunVis;
       this._cone(0.9);
       const sp = rnd(2.5, 8);
       s.x = point.x + _n.x * 0.02; s.y = point.y + _n.y * 0.02; s.z = point.z + _n.z * 0.02;
@@ -401,7 +420,7 @@ export class Impacts {
       this.lit.spawn(s);
       // A matching additive glint: glass is only readable when it catches light.
       if (i % 2 === 0) {
-        const g = resetSpec();
+        const g = resetSpec(); g.sunVis = this.sunVis;
         g.x = s.x; g.y = s.y; g.z = s.z;
         g.vx = s.vx; g.vy = s.vy; g.vz = s.vz;
         g.life = s.life * 0.7; g.drag = s.drag; g.gravity = s.gravity;
@@ -417,7 +436,7 @@ export class Impacts {
 
   _muted(point, def, e) {
     for (let i = 0; i < 3; i++) {
-      const s = resetSpec();
+      const s = resetSpec(); s.sunVis = this.sunVis;
       this._cone(0.8);
       const sp = rnd(0.8, 2.4);
       s.x = point.x + _n.x * 0.03; s.y = point.y + _n.y * 0.03; s.z = point.z + _n.z * 0.03;
@@ -447,10 +466,11 @@ export class Impacts {
     if (_r.lengthSq() < 1e-8) _r.set(0, 0, 1);
     _r.normalize();
     this._frame(_r);
+    this.sunVis = this.sunVisibility(point, null);
 
     const n = Math.round(rnd(6, 9) * e);
     for (let i = 0; i < n; i++) {
-      const s = resetSpec();
+      const s = resetSpec(); s.sunVis = this.sunVis;
       this._cone(0.42);
       const sp = rnd(1.6, 5.2);
       s.x = point.x; s.y = point.y; s.z = point.z;
@@ -466,7 +486,7 @@ export class Impacts {
       this.lit.spawn(s);
     }
     for (let i = 0; i < 2; i++) {
-      const s = resetSpec();
+      const s = resetSpec(); s.sunVis = this.sunVis;
       this._cone(0.6);
       s.x = point.x; s.y = point.y; s.z = point.z;
       s.vx = _v.x * 1.6; s.vy = _v.y * 1.6 + 0.2; s.vz = _v.z * 1.6;

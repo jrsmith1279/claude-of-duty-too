@@ -23,6 +23,7 @@ import { resetSpec } from './ParticleField.js';
 
 const _v = new THREE.Vector3();
 const _p = new THREE.Vector3();
+const _colOpts = { sunVis: 1 };
 const rnd = (a, b) => a + Math.random() * (b - a);
 
 export class Explosions {
@@ -43,12 +44,13 @@ export class Explosions {
    */
   explode(pos, radius = 5, opts) {
     const R = THREE.MathUtils.clamp(radius || 5, 0.6, 24);
+    const sunVis = this.fx?.impacts?.sunVisibility?.(pos, null) ?? 1;
     const k = R / 5;
     const hold = opts?.hold || 0;
     _p.set(pos.x, pos.y, pos.z);
 
     // --- flash --------------------------------------------------------------
-    const f = resetSpec();
+    const f = resetSpec(); f.sunVis = sunVis;
     f.x = _p.x; f.y = _p.y; f.z = _p.z;
     f.life = 0.075 + hold; f.gravity = 0; f.drag = 0;
     f.size0 = 1.1 * k; f.size1 = 2.4 * k;
@@ -62,7 +64,8 @@ export class Explosions {
     // --- fireball -----------------------------------------------------------
     const balls = 9;
     for (let i = 0; i < balls; i++) {
-      const s = resetSpec();
+      const s = resetSpec(); s.sunVis = sunVis;
+      s.sunVis = sunVis;
       const core = i < 3;
       const a = Math.random() * Math.PI * 2;
       const el = rnd(-0.25, 0.85);
@@ -84,7 +87,8 @@ export class Explosions {
 
     // Sooty shell wrapping the fireball, so it is not pure additive glow.
     for (let i = 0; i < 7; i++) {
-      const s = resetSpec();
+      const s = resetSpec(); s.sunVis = sunVis;
+      s.sunVis = sunVis;
       const a = Math.random() * Math.PI * 2;
       const el = rnd(-0.1, 0.9);
       const sp = rnd(1.6, 4.6) * k;
@@ -107,7 +111,7 @@ export class Explosions {
     // --- ground dust ring ---------------------------------------------------
     const ringN = 14;
     for (let i = 0; i < ringN; i++) {
-      const s = resetSpec();
+      const s = resetSpec(); s.sunVis = sunVis;
       const a = (i / ringN) * Math.PI * 2 + rnd(-0.16, 0.16);
       const sp = rnd(5.5, 9.5) * k;
       s.x = _p.x + Math.cos(a) * 0.4 * k;
@@ -127,7 +131,7 @@ export class Explosions {
       this.lit.spawn(s);
     }
     // Shock ring on the deck, one frame behind the flash.
-    const ring = resetSpec();
+    const ring = resetSpec(); ring.sunVis = sunVis;
     ring.x = _p.x; ring.y = _p.y - 0.05; ring.z = _p.z;
     ring.life = 0.28 + hold; ring.gravity = 0; ring.drag = 0;
     ring.size0 = 0.6 * k; ring.size1 = 5.5 * k;
@@ -140,7 +144,8 @@ export class Explosions {
     // --- debris and embers --------------------------------------------------
     const debris = Math.round(18 * k);
     for (let i = 0; i < debris; i++) {
-      const s = resetSpec();
+      const s = resetSpec(); s.sunVis = sunVis;
+      s.sunVis = sunVis;
       const a = Math.random() * Math.PI * 2;
       const el = rnd(0.05, 1.25);
       const sp = rnd(5, 20) * Math.sqrt(k);
@@ -159,7 +164,8 @@ export class Explosions {
     }
     const embers = Math.round(22 * k);
     for (let i = 0; i < embers; i++) {
-      const s = resetSpec();
+      const s = resetSpec(); s.sunVis = sunVis;
+      s.sunVis = sunVis;
       const a = Math.random() * Math.PI * 2;
       const el = rnd(-0.1, 1.2);
       const sp = rnd(4, 17) * Math.sqrt(k);
@@ -178,6 +184,7 @@ export class Explosions {
 
     // --- lingering column and scorch ---------------------------------------
     const col = this.smoke.column(_p, {
+      sunVis,
       rate: 10 * Math.min(2, k),
       duration: 7 + 3 * k,
       radius: 0.35 * k,

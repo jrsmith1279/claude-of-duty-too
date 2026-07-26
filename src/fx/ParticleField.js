@@ -49,6 +49,7 @@ export const SPEC = {
   rot: 0, rotSpeed: 0,
   size0: 0.2, size1: 0.35,
   tile: 15, turb: 0, stretch: 0, soft: 0.5,
+  sunVis: 1,
   fadeIn: 0.08, fadeOut: 0.4,
   r0: 1, g0: 1, b0: 1, a0: 1,
   r1: 1, g1: 1, b1: 1, a1: 0,
@@ -63,6 +64,7 @@ export function resetSpec() {
   s.rot = 0; s.rotSpeed = 0;
   s.size0 = 0.2; s.size1 = 0.35;
   s.tile = 15; s.turb = 0; s.stretch = 0; s.soft = 0.5;
+  s.sunVis = 1;
   s.fadeIn = 0.08; s.fadeOut = 0.4;
   s.r0 = 1; s.g0 = 1; s.b0 = 1; s.a0 = 1;
   s.r1 = 1; s.g1 = 1; s.b1 = 1; s.a1 = 0;
@@ -80,6 +82,7 @@ attribute vec4 iD;    // size0, size1, tile, turbulence
 attribute vec4 iE;    // stretch, softDistance, fadeIn, fadeOut
 attribute vec4 iF;    // colour + alpha at birth
 attribute vec4 iG;    // colour + alpha at death
+attribute vec4 iH;    // sun visibility, spare
 
 uniform float uTime;
 
@@ -88,6 +91,7 @@ varying vec4 vCol;
 varying vec2 vQuad;
 varying vec3 vViewPos;
 varying float vSoft;
+varying float vSun;
 varying vec4 vClip;
 
 #include <fog_pars_vertex>
@@ -100,7 +104,7 @@ void main(){
     // before rasterisation, which is how dead ring slots cost nothing.
     gl_Position = vec4(0.0, 0.0, -2.0, 1.0);
     vUv = vec2(0.0); vCol = vec4(0.0); vQuad = vec2(0.0);
-    vViewPos = vec3(0.0); vSoft = 1.0; vClip = gl_Position;
+    vViewPos = vec3(0.0); vSoft = 1.0; vSun = 1.0; vClip = gl_Position;
     return;
   }
 
@@ -173,6 +177,7 @@ void main(){
   // absolute. A 4 m smoke puff should feather over metres; a 2 cm dust wisp
   // sitting 4 cm off the wall it came from must not be erased by the same rule.
   vSoft = max(0.02, iE.y * sz);
+  vSun = iH.x;
 
   vec4 mvPosition = viewMatrix * vec4(wpos, 1.0);
   vViewPos = mvPosition.xyz;
@@ -202,6 +207,7 @@ varying vec4 vCol;
 varying vec2 vQuad;
 varying vec3 vViewPos;
 varying float vSoft;
+varying float vSun;
 varying vec4 vClip;
 
 ${lit ? '#include <fog_pars_fragment>' : ''}
@@ -227,7 +233,10 @@ ${lit ? `
   float selfShadow = mix(1.0, 0.45, clamp(tex.b, 0.0, 1.0));
   float upness = clamp(dot(n, uUpView) * 0.5 + 0.5, 0.0, 1.0);
   vec3 ambient = mix(uGround, uAmbient, upness);
-  col *= ambient + uSunColor * ((wrap * wrap * 1.05 + forward * 0.55) * selfShadow);
+  // vSun is the emitter's shadow visibility, sampled once with a single ray
+  // when the effect spawned. Dust lit as if in full sun while standing in the
+  // shadow half of a street is one of the loudest possible tells.
+  col *= ambient + uSunColor * ((wrap * wrap * 1.05 + forward * 0.55) * selfShadow * vSun);
 ` : `
   col *= mix(1.0, 1.0 + tex.b * 0.8, 0.6);
 `}
@@ -247,7 +256,7 @@ ${lit ? '  #include <fog_fragment>' : ''}
 `;
 }
 
-const ATTRS = ['iA', 'iB', 'iC', 'iD', 'iE', 'iF', 'iG'];
+const ATTRS = ['iA', 'iB', 'iC', 'iD', 'iE', 'iF', 'iG', 'iH'];
 
 export class ParticleField {
   /**
@@ -347,6 +356,7 @@ export class ParticleField {
     const f = d.iE; f[o] = spec.stretch; f[o + 1] = spec.soft; f[o + 2] = spec.fadeIn; f[o + 3] = spec.fadeOut;
     const g = d.iF; g[o] = spec.r0; g[o + 1] = spec.g0; g[o + 2] = spec.b0; g[o + 3] = spec.a0;
     const h = d.iG; h[o] = spec.r1; h[o + 1] = spec.g1; h[o + 2] = spec.b1; h[o + 3] = spec.a1;
+    const k = d.iH; k[o] = spec.sunVis; k[o + 1] = 0; k[o + 2] = 0; k[o + 3] = 0;
 
     const expiry = birth + life;
     if (expiry > this.maxExpiry) this.maxExpiry = expiry;

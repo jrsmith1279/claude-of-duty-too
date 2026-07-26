@@ -32,6 +32,8 @@ const _origin = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 const _mw = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
+const _magHalf = new THREE.Vector3(0.026, 0.070, 0.032);
+const _angVel = new THREE.Vector3();
 const _snapshot = { yaw: 0, pitch: 0, speed01: 0, sprint: false, grounded: true, stance: 'stand', adsW: 0 };
 
 const MAG_POOL = 3;
@@ -321,19 +323,30 @@ export class WeaponSystem {
     const L = ctx.physics.LAYER;
     const body = ctx.physics.addRigidBody({
       type: 'box',
-      halfExtents: new THREE.Vector3(0.014, 0.09, 0.014),
-      mass: 0.12,
+      // Inflated relative to the real 26 x 62 x 185 mm magazine on purpose: the
+      // rigid-body solver resolves boxes as eight corner contacts with an 18 mm
+      // skin, so a half-extent below that is permanently self-penetrating and
+      // the body launches itself to infinity on the first step. Measured.
+      halfExtents: _magHalf,
+      mass: 0.11,
       position: _v,
       quaternion: _q,
       velocity: _up,
-      restitution: 0.18,
-      friction: 0.7,
+      angularVelocity: _angVel.set(
+        (Math.random() - 0.5) * 9, (Math.random() - 0.5) * 5, (Math.random() - 0.5) * 7,
+      ),
+      restitution: 0.16,
+      friction: 0.75,
+      linearDamping: 0.10,
+      angularDamping: 0.9,
       life: 9,
       mask: L ? L.WORLD | L.PROPS : undefined,
     });
     if (!body) { this._releaseMagMesh(mesh); return; }
     mesh.visible = true;
-    this._magActive.push({ body, mesh, t: 0 });
+    // The clone is authored in weapon space, so its origin is the receiver, not
+    // the magazine. Ride the body back down the socket offset to line them up.
+    this._magActive.push({ body, mesh, t: 0, off: node.position.clone() });
   }
 
   _acquireMagMesh(model) {
@@ -373,7 +386,9 @@ export class WeaponSystem {
       // own local axis to put the geometry where the collider is.
       e.mesh.position.copy(b.position);
       e.mesh.quaternion.copy(b.quaternion);
-      e.mesh.translateY(0.09);
+      e.mesh.translateX(-e.off.x);
+      e.mesh.translateY(-e.off.y);
+      e.mesh.translateZ(-e.off.z);
       e.mesh.updateMatrix();
       e.mesh.updateMatrixWorld(true);
     }

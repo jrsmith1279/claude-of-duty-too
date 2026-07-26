@@ -84,7 +84,11 @@ export class Ballistics {
     b.damage = damage;
     b.penPower = def.penPower;
     // Light, fast rifle rounds shed velocity slowly; pistol and buckshot fast.
-    b.drag = def.caliber === '12ga' ? 9.5e-4 : def.muzzleVelocity > 700 ? 1.15e-4 : 3.2e-4;
+    // Calibrated against real drop tables rather than guessed: 8.5e-4 gives a
+    // 5.56 round ~690 m/s2 of deceleration at the muzzle, so it sheds about
+    // 100 m/s over the first 100 m. The first pass ran an order of magnitude
+    // lower and the round arrived at 300 m still doing 858 m/s.
+    b.drag = def.caliber === '12ga' ? 6.0e-3 : def.muzzleVelocity > 700 ? 8.5e-4 : 1.7e-3;
     b.weapon = def;
     b.owner = owner || 'player';
     this.active.push(b);

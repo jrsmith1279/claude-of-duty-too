@@ -183,11 +183,19 @@ export class Site {
         if (!f) continue;
         // Standing room: something whose body spans knee to chest height here
         // is a wall, a barrier or a lamp post, not a floor.
+        // Overlap with the cell's *square*, not containment of its centre. A
+        // 350 mm partition on a 1 m grid falls cleanly between two samples, so
+        // the centre test leaves no blocked cell anywhere along it — the
+        // distance transform then reads straight through the wall and the room
+        // it encloses never produces a facade at all. That is exactly what
+        // happened to the one enterable interior on this map: every wall in it
+        // stayed clean because the survey did not believe it was there.
         let blocked = false;
         const lo = f.y + 0.28, hi = f.y + 1.5;
+        const h = GRID_STEP * 0.5;
         for (let k = 0; k < obstacles.length; k++) {
           const b = obstacles[k];
-          if (x < b[0] || x > b[1] || z < b[2] || z > b[3]) continue;
+          if (x + h <= b[0] || x - h >= b[1] || z + h <= b[2] || z - h >= b[3]) continue;
           if (b[5] < lo || b[4] > hi) continue;
           blocked = true;
           break;

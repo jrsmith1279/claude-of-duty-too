@@ -78,7 +78,7 @@ export function buildM4(resolve) {
     // Brass deflector, forward assist, port-cover detent, rear takedown lug.
     p.add('black', chamferProfile(polyShape([0, -0.008, 0.0085, -0.0015, 0.0085, 0.0055, 0, 0.010]), 0.017, { bevel: 0.0009 }), { x: 0.0185, y: 0.0035, z: 0.0055 });
     p.add('park', cyl(0.0058, 0.0062, 0.016, 12), { x: 0.0208, y: 0.0118, z: 0.0300, ry: Math.PI / 2 });
-    p.add('steel', cyl(0.0042, 0.0042, 0.005, 10), { x: 0.0290, y: 0.0118, z: 0.0300, ry: Math.PI / 2 });
+    p.add('park', cyl(0.0042, 0.0042, 0.005, 10), { x: 0.0290, y: 0.0118, z: 0.0300, ry: Math.PI / 2 });
     p.add('black', chamferBox(0.0072, 0.0072, 0.010, { r: 0.002, bevel: 0.0008 }), { x: 0.0175, y: -0.0165, z: -0.0035 });
     // Charging-handle housing at the rear.
     p.add('black', chamferBox(0.030, 0.0125, 0.014, { r: 0.003, bevel: 0.0010 }), { y: 0.0155, z: 0.0770 });
@@ -87,6 +87,10 @@ export function buildM4(resolve) {
     p.add('black', cyl(0.0230, 0.0230, 0.008, 18), { z: -0.1040 });
     // Rear receiver-extension boss.
     p.add('black', cyl(0.0182, 0.0182, 0.012, 16), { z: 0.0810 });
+    // Dust cover, hinged along the bottom of the port and hanging open, as it
+    // is on any weapon that has been fired. Part of the receiver mesh: it does
+    // not animate, and one 4 mm plate is not worth its own draw call.
+    p.add('black', chamferBox(0.0038, 0.0215, 0.0470, { r: 0.0015, bevel: 0.0008 }), { x: 0.0235, y: -0.0230, z: -0.0290, rz: -0.62 });
     p.group.name = 'receiver';
     p.build();
     root.add(p.group);
@@ -121,11 +125,11 @@ export function buildM4(resolve) {
     p.add('polymer', chamferBox(0.0300, 0.0180, 0.0140, { r: 0.0055, bevel: 0.0012 }), { y: -0.0450, z: 0.0830, rx: 0.5 });
     // Magazine release with its fence, bolt catch, takedown pins.
     p.add('black', cyl(0.0072, 0.0072, 0.0075, 10), { x: 0.0196, y: -0.0300, z: MAG_Z + 0.026, ry: Math.PI / 2 });
-    p.add('steel', cyl(0.0046, 0.0046, 0.0125, 10), { x: 0.0215, y: -0.0300, z: MAG_Z + 0.026, ry: Math.PI / 2 });
+    p.add('polymer', cyl(0.0046, 0.0046, 0.0125, 10), { x: 0.0215, y: -0.0300, z: MAG_Z + 0.026, ry: Math.PI / 2 });
     p.add('black', chamferBox(0.0060, 0.0155, 0.0300, { r: 0.0022, bevel: 0.0009 }), { x: -0.0202, y: -0.0290, z: MAG_Z + 0.030 });
     p.add('black', chamferBox(0.0048, 0.0100, 0.0105, { r: 0.0018, bevel: 0.0008 }), { x: -0.0218, y: -0.0330, z: MAG_Z + 0.020 });
     for (const z of [-0.0850, 0.0620]) {
-      p.addMirrored('steel', cyl(0.0040, 0.0040, 0.0032, 10), { x: 0.0192, y: z < 0 ? -0.0250 : -0.0245, z, ry: Math.PI / 2 });
+      p.addMirrored('polymer', cyl(0.0040, 0.0040, 0.0032, 10), { x: 0.0192, y: z < 0 ? -0.0250 : -0.0245, z, ry: Math.PI / 2 });
     }
     p.group.name = 'lower';
     p.build();
@@ -163,7 +167,7 @@ export function buildM4(resolve) {
     p.add('black', ring(HG_R - 0.0008, 0.0038, 18, 6), { z: HG_Z1 - 0.002 });
     p.add('black', picatinny(0.052, { pitch: 0.0102 }), { x: HG_R - 0.0016, y: 0, z: HG_Z1 + 0.048, rz: -Math.PI / 2 });
     // Anti-rotation screws along the top edge.
-    for (let i = 0; i < 4; i++) p.addMirrored('steel', screw(0.0019, 0.0010), { x: 0.0128, y: 0.0170, z: HG_Z0 - 0.028 - i * 0.048, rz: 0.5 });
+    for (let i = 0; i < 4; i++) p.addMirrored('black', screw(0.0019, 0.0010), { x: 0.0128, y: 0.0170, z: HG_Z0 - 0.028 - i * 0.048, rz: 0.5 });
     p.group.name = 'handguard';
     p.build();
     root.add(p.group);
@@ -179,8 +183,8 @@ export function buildM4(resolve) {
     ], 18), {});
     // Low-profile gas block plus the gas tube running back under the handguard.
     p.add('park', chamferBox(0.0205, 0.0240, 0.0330, { r: 0.0035, bevel: 0.0011 }), { y: 0.0038, z: -0.3160 });
-    p.add('steel', cyl(0.0026, 0.0026, 0.2000, 8), { y: 0.0136, z: -0.2180 });
-    p.addMirrored('steel', screw(0.0018, 0.0010), { x: 0.0102, y: 0.0038, z: -0.3080, rz: Math.PI / 2 });
+    p.add('park', cyl(0.0026, 0.0026, 0.2000, 8), { y: 0.0136, z: -0.2180 });
+    p.addMirrored('park', screw(0.0018, 0.0010), { x: 0.0102, y: 0.0038, z: -0.3080, rz: Math.PI / 2 });
     // A2-pattern birdcage: rear collar, six tines with real gaps, muzzle ring.
     p.add('park', cyl(0.0114, 0.0114, 0.0105, 14), { z: -0.4105 });
     for (let i = 0; i < 6; i++) {
@@ -305,19 +309,6 @@ export function buildM4(resolve) {
     root.add(p.group);
   }
 
-  // ------------------------------------------------------------ dust cover
-  {
-    const p = P('dustCover');
-    // Hinged along the bottom of the port and hanging open, as it is on any
-    // weapon that has been fired.
-    p.add('black', chamferBox(0.0038, 0.0215, 0.0470, { r: 0.0015, bevel: 0.0008 }), { x: 0.0055, y: -0.0100 });
-    p.group.name = 'dustCover';
-    p.build();
-    p.group.position.set(0.0180, -0.0130, -0.0290);
-    p.group.rotation.z = -0.62;
-    root.add(p.group);
-  }
-
   // ----------------------------------------------------------------- trigger
   {
     const p = P('trigger');
@@ -331,7 +322,7 @@ export function buildM4(resolve) {
   // ---------------------------------------------------------------- selector
   {
     const p = P('selector');
-    p.add('steel', cyl(0.0056, 0.0056, 0.0110, 12), { ry: Math.PI / 2 });
+    p.add('black', cyl(0.0056, 0.0056, 0.0110, 12), { ry: Math.PI / 2 });
     p.add('black', chamferProfile(polyShape([-0.004, -0.0035, 0.020, -0.006, 0.024, 0.000, 0.020, 0.006, -0.004, 0.0035]), 0.0050, { bevel: 0.0008 }), { x: -0.0080, ry: Math.PI / 2, rz: -Math.PI / 2 });
     p.group.name = 'selector';
     p.build();

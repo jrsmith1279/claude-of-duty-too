@@ -76,6 +76,7 @@ export class MuzzleFlash {
   flash(worldMatrix, scale = 1, opts) {
     const k = THREE.MathUtils.clamp(scale || 1, 0.35, 3);
     this._basis(worldMatrix, opts?.dir);
+    const sunVis = opts?.sunVis ?? 1;
     // `persist` freezes the flash at its peak for a staged screenshot: the
     // life becomes `persist` and the particle is born 10% of that in the past,
     // which lands it past the fade-in and well before the fade-out. Simply
@@ -85,7 +86,7 @@ export class MuzzleFlash {
     const holdAge = -hold * 0.10;
 
     // --- crown star ---------------------------------------------------------
-    const star = resetSpec();
+    const star = resetSpec(); star.sunVis = sunVis;
     star.x = _pos.x + _fwd.x * 0.045; star.y = _pos.y + _fwd.y * 0.045; star.z = _pos.z + _fwd.z * 0.045;
     star.life = hold > 0 ? hold : 0.035 + Math.random() * 0.018;
     star.delay = holdAge;
@@ -104,7 +105,7 @@ export class MuzzleFlash {
     const lobes = 1 + ((Math.random() * 2) | 0);
     for (let i = 0; i < lobes; i++) {
       const len = (0.24 + Math.random() * 0.20) * k;
-      const s = resetSpec();
+      const s = resetSpec(); s.sunVis = sunVis;
       // Velocity-aligned so the cone points down the bore regardless of where
       // the camera is; the offset puts the lobe's base at the crown.
       const speed = 6;
@@ -129,7 +130,7 @@ export class MuzzleFlash {
     // --- unburnt powder -----------------------------------------------------
     const embers = 4 + ((Math.random() * 5) | 0);
     for (let i = 0; i < embers; i++) {
-      const s = resetSpec();
+      const s = resetSpec(); s.sunVis = sunVis;
       s.x = _pos.x; s.y = _pos.y; s.z = _pos.z;
       const sp = rnd(3.5, 11) * k;
       _tmp.copy(_fwd)
@@ -150,7 +151,7 @@ export class MuzzleFlash {
 
     // --- gas / dust kicked off the crown ------------------------------------
     for (let i = 0; i < 2; i++) {
-      const s = resetSpec();
+      const s = resetSpec(); s.sunVis = sunVis;
       s.x = _pos.x + _fwd.x * 0.12; s.y = _pos.y + _fwd.y * 0.12; s.z = _pos.z + _fwd.z * 0.12;
       _tmp.copy(_fwd).addScaledVector(_right, rnd(-0.5, 0.5)).addScaledVector(_up, rnd(-0.2, 0.5));
       s.vx = _tmp.x * 2.2; s.vy = _tmp.y * 2.2; s.vz = _tmp.z * 2.2;
@@ -163,6 +164,7 @@ export class MuzzleFlash {
       s.r0 = 0.50; s.g0 = 0.48; s.b0 = 0.45;
       s.r1 = 0.60; s.g1 = 0.59; s.b1 = 0.57;
       s.a0 = 0.22; s.a1 = 0;
+
       s.fadeIn = 0.06; s.fadeOut = 0.6;
       this.smoke.lit.spawn(s);
     }
