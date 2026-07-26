@@ -701,6 +701,30 @@ export class FacadeAtlas {
    * Opaque and depth-writing on purpose: a hundred alpha-blended panes stacked
    * down a street is the single most expensive thing this renderer could be
    * asked to draw, and none of these cells needs a soft edge.
+   *
+   * MEASURED, and the two numbers here are not taste:
+   *
+   * - `clearcoat: 0`. The brief asked for 0.55 so the sky reflection would come
+   *   from coat Fresnel. It does look better — and it costs TWO shader programs
+   *   against a 59-of-60 budget, because `USE_CLEARCOAT` forks the permutation
+   *   away from the one `decalHard` already compiled for this exact key. At
+   *   zero, both glazing buckets land on that existing program and the whole
+   *   atlas costs no programs at all. The sky is still there, off the base
+   *   specular lobe against the same PMREM env map, and still tracks time of
+   *   day; it is broader and softer, which is the price.
+   *
+   * - `roughness: 0.42`, not 0.30. Two reasons, and the first was only visible
+   *   at 4x. `gun_polymer` carries `detail: [6, 0.4]`, a procedural detail
+   *   normal sampled at `codUv * 6`. `codUv` here is the atlas UV, so six tiles
+   *   of weapon-grip diamond checkering land across the atlas — about one and a
+   *   half per cell — and `normalScale: 0` does not touch it, because the
+   *   detail path multiplies by `codSurface.y` rather than by the normal scale.
+   *   At 0.30 roughness that checkering was clearly legible across every pane
+   *   on the sunlit facade. At 0.42 the specular lobe is broad enough to bury
+   *   it. Second, at 0.30 a pane seen down the street at a grazing angle
+   *   mirrored the sun hard enough to measure the same luminance as the sunlit
+   *   plaster beside it, which is the exact failure the brief's "pane <= 0.18x
+   *   wall" check exists to catch.
    */
   overrides(emissive = false) {
     const o = {
@@ -710,10 +734,9 @@ export class FacadeAtlas {
       depthWrite: true,
       normalScale: 0,
       metalness: 0,
-      roughness: 0.30,
-      clearcoat: 0.55,
-      clearcoatRoughness: 0.14,
-      envMapIntensity: 1.15,
+      roughness: 0.42,
+      clearcoat: 0,
+      envMapIntensity: 0.70,
       vertexColors: true,
       side: THREE.FrontSide,
     };
