@@ -47,7 +47,7 @@ const ARM_MAX = (LIMB.upperArm + LIMB.forearm) * 0.995;
 const HIP_HALF = LIMB.hipHalf;
 // How far a rolled foot lifts and pulls its ankle back toward the hip.
 const ROLL_LIFT = 0.118;
-const ROLL_PULL = 0.10;
+const ROLL_PULL = 0.07;
 
 // Standing hip height is deliberately 3.5 cm below the rest pose's 0.940. At
 // 0.940 the leg is dead straight — the rig's hip-to-ankle distance is 0.841 and
@@ -224,7 +224,7 @@ export class BotAnimator {
   _stepFeet(s, dt, crouch) {
     const st = crouch > 0.5 ? STANCE.crouch : STANCE.stand;
     const speed = this.speedSmooth;
-    const running = speed > 2.7;
+    const running = speed > 2.2;
     // 0.75 m step at a 1.4 m/s walk, 1.25 m at a 4.5 m/s run.
     const stride = THREE.MathUtils.clamp(0.46 + speed * 0.175, 0.42, 1.28) * (1 - crouch * 0.28);
     const swingTime = THREE.MathUtils.clamp(0.38 - speed * 0.020, 0.26, 0.38);
@@ -277,11 +277,11 @@ export class BotAnimator {
 
       f.pos.copy(f.plant);
       // Toe-off: `heel` is set by the hip solver when the leg runs out of reach.
-      f.pitch = damp(f.pitch, f.heel * (f.lead < 0 ? 0.62 : -0.42), 16, dt);
+      f.pitch = damp(f.pitch, f.heel * (f.lead < 0 ? 0.75 : -0.42), 16, dt);
 
       const err = Math.hypot(f.plant.x - f.nx, f.plant.z - f.nz);
       const yawErr = Math.abs(shortAngle(f.plantYaw - this.yaw));
-      const threshold = THREE.MathUtils.clamp(stride * 0.5, 0.235, 0.40);
+      const threshold = THREE.MathUtils.clamp(stride * 0.5, 0.26, 0.42);
       const score = err / threshold + yawErr / 0.5;
       if (score > 1 && score > wantErr) { want = i; wantErr = score; }
     }
@@ -296,9 +296,9 @@ export class BotAnimator {
       // reach — a stalled step is what makes a bot walk in a squat.
       const lag = Math.hypot(this.feet[want].plant.x - this.feet[want].nx,
         this.feet[want].plant.z - this.feet[want].nz);
-      if (other.t > (running ? 0.62 : 0.78)) {
+      if (other.t > (running ? 0.55 : 0.80) || lag > 0.46) {
         // fall through and start the second swing
-      } else if (lag > 0.52) {
+      } else if (lag > 0.50 && other.t > 0.40) {
         other.t = 1;
         other.swinging = false;
         other.plant.copy(other.target);
@@ -316,8 +316,10 @@ export class BotAnimator {
     // never further ahead than the leg can reach, or the pelvis has to dive to
     // meet the foot on the frame it lands. At a run the extra step length comes
     // out of the flight phase instead, which is where it comes from in life.
+    // The landing offset has to stay clear of the step trigger, or the foot
+    // arrives already past the threshold and re-triggers on the frame it lands.
     const ahead = speed > 0.3
-      ? swingTime + Math.min(stride * 0.5, 0.36) * invSpeed
+      ? swingTime + Math.min(stride * 0.42, 0.30) * invSpeed
       : 0;
     f.target.set(
       f.nx + s.velocity.x * ahead,
@@ -450,6 +452,24 @@ export class BotAnimator {
 
       const thighRest = f.side < 0 ? REST.thighL : REST.thighR;
       _b.copy(thighRest).sub(REST.hips).applyQuaternion(this._Q.hips).add(this._P.hips);
+
+      // Guarantee the target is reachable, and do it by RAISING the ankle
+      // rather than by pulling it in. Horizontal position is the only thing a
+      // viewer can see sliding; two centimetres of lift at the extreme of a
+      // stride is invisible and reads as the heel coming up anyway. Without
+      // this the two-bone solver clamps, the foot falls short of its plant by
+      // a varying amount, and the shortfall drags across the ground.
+      const dxz2 = (_a.x - _b.x) * (_a.x - _b.x) + (_a.z - _b.z) * (_a.z - _b.z);
+      if (dxz2 + (_a.y - _b.y) * (_a.y - _b.y) > LEG_MAX * LEG_MAX) {
+        if (dxz2 < LEG_MAX * LEG_MAX * 0.98) {
+          _a.y = _b.y - Math.sqrt(LEG_MAX * LEG_MAX - dxz2);
+        } else {
+          const k = (LEG_MAX * 0.99) / Math.sqrt(dxz2);
+          _a.x = _b.x + (_a.x - _b.x) * k;
+          _a.z = _b.z + (_a.z - _b.z) * k;
+          _a.y = _b.y;
+        }
+      }
 
       // Knee points forward, opened out in a crouch and rolled with the lean.
       _c.set(f.side * (0.20 + crouch * 0.42), 0.06, 1).normalize();

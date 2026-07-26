@@ -127,6 +127,45 @@ export class Site {
   }
 
   /**
+   * Axis-aligned world boxes of everything standing on the floor.
+   *
+   * A downward raycast alone cannot answer "is this point inside a building".
+   * `Physics.raycast` flips every hit normal to oppose the ray, which is right
+   * for shading and shooting and destroys the one bit needed here: a ray fired
+   * down through a solid block reports the block's *underside* as an
+   * upward-facing floor at y = 0, so the entire footprint of every building
+   * surveyed as walkable open street. Parity counting does not rescue it either
+   * — the blockout has coincident faces where one box sits exactly on another,
+   * and a crossing gets lost.
+   *
+   * Bounding boxes are exact enough for the question actually being asked and
+   * cost nothing. Anything under a metre tall is deliberately not an obstacle:
+   * kerbs, thresholds and floor slabs are walkable, and their height *step* is
+   * carried in its own channel because that is where silt collects.
+   */
+  _collectObstacles() {
+    const boxes = [];
+    const roots = [this.ctx.level?.root].filter(Boolean);
+    if (!roots.length && this.ctx.scene) roots.push(this.ctx.scene);
+    const box = new THREE.Box3();
+    for (const root of roots) {
+      root.updateMatrixWorld(true);
+      root.traverse((o) => {
+        if (!o.isMesh || o.userData?.noCollide || !o.geometry) return;
+        box.setFromObject(o);
+        if (!isFinite(box.min.x) || !isFinite(box.max.x)) return;
+        const sy = box.max.y - box.min.y;
+        const sx = box.max.x - box.min.x;
+        const sz = box.max.z - box.min.z;
+        // The 400 m ground plane is not an obstacle; nor is anything flat.
+        if (sy < 1.0 || sx > 200 || sz > 200) return;
+        boxes.push([box.min.x, box.max.x, box.min.z, box.max.z, box.min.y, box.max.y]);
+      });
+    }
+    return boxes;
+  }
+
+  /**
    * Fills the grid. ~6 k downward rays plus a horizontal probe on the cells the
    * distance field says are near something; the BVH eats that in a few ms and it
    * happens once, during init.
@@ -134,6 +173,7 @@ export class Site {
   survey() {
     const { nx, nz } = this;
     const phys = this.ctx.physics;
+    const obstacles = this._collectObstacles();
 
     for (let iz = 0; iz < nz; iz++) {
       for (let ix = 0; ix < nx; ix++) {
@@ -141,8 +181,20 @@ export class Site {
         const x = this.xOf(ix), z = this.zOf(iz);
         const f = this._floorAt(x, z);
         if (!f) continue;
-        // Reject anything with a prop or a low ceiling sitting on it, but keep
-        // real interiors: a 3.4 m room is content, a 0.9 m crevice is not.
+        // Standing room: something whose body spans knee to chest height here
+        // is a wall, a barrier or a lamp post, not a floor.
+        let blocked = false;
+        const lo = f.y + 0.28, hi = f.y + 1.5;
+        for (let k = 0; k < obstacles.length; k++) {
+          const b = obstacles[k];
+          if (x < b[0] || x > b[1] || z < b[2] || z > b[3]) continue;
+          if (b[5] < lo || b[4] > hi) continue;
+          blocked = true;
+          break;
+        }
+        if (blocked) continue;
+        // Reject anything with a low ceiling sitting on it, but keep real
+        // interiors: a 3.4 m room is content, a 0.9 m crevice is not.
         _o.set(x, f.y + 0.06, z);
         _d.set(0, 1, 0);
         const up = phys?.raycast ? phys.raycast(_o, _d, 14) : null;

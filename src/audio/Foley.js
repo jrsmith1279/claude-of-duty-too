@@ -28,11 +28,11 @@ const rnd = mulberry32(0x51EA);
 const FAMILY = {
   concrete: { thud: [95, 0.055, 0.55], mid: [1250, 1.1, 0.035, 0.55], click: [5200, 0.006, 0.30], grains: 0, ring: 0, damp: 1 },
   asphalt: { thud: [80, 0.065, 0.60], mid: [820, 0.9, 0.045, 0.50], click: [3800, 0.008, 0.18], grains: 0, ring: 0, damp: 0.9 },
-  gravel: { thud: [110, 0.040, 0.35], mid: [1500, 0.9, 0.030, 0.30], click: [6200, 0.005, 0.22], grains: 7, grainF: 4200, ring: 0, damp: 0.75 },
+  gravel: { thud: [110, 0.040, 0.40], mid: [1500, 0.9, 0.030, 0.38], click: [6200, 0.005, 0.28], grains: 7, grainF: 4200, ring: 0, damp: 1.05 },
   dirt: { thud: [72, 0.075, 0.55], mid: [430, 0.8, 0.055, 0.42], click: [2200, 0.010, 0.08], grains: 3, grainF: 2400, ring: 0, damp: 0.55 },
   sand: { thud: [64, 0.085, 0.42], mid: [300, 0.7, 0.070, 0.34], click: [1600, 0.014, 0.05], grains: 4, grainF: 1800, ring: 0, damp: 0.4 },
-  wood: { thud: [130, 0.050, 0.50], mid: [560, 1.4, 0.048, 0.60], click: [3400, 0.007, 0.24], grains: 0, ring: [340, 14, 0.13, 0.28], damp: 0.95 },
-  metal: { thud: [150, 0.035, 0.36], mid: [1800, 1.6, 0.030, 0.52], click: [7400, 0.005, 0.34], grains: 0, ring: [1240, 30, 0.34, 0.42], damp: 1.15 },
+  wood: { thud: [130, 0.050, 0.50], mid: [560, 1.4, 0.048, 0.60], click: [3400, 0.007, 0.24], grains: 0, ring: [340, 14, 0.13, 0.34], damp: 1.15 },
+  metal: { thud: [150, 0.035, 0.40], mid: [1800, 1.6, 0.030, 0.62], click: [7400, 0.005, 0.40], grains: 0, ring: [1240, 30, 0.34, 0.55], damp: 1.45 },
   glass: { thud: [220, 0.020, 0.16], mid: [4200, 2.0, 0.022, 0.42], click: [9000, 0.004, 0.42], grains: 9, grainF: 7200, ring: [3300, 34, 0.20, 0.30], damp: 1.2 },
   rubble: { thud: [88, 0.060, 0.52], mid: [980, 0.9, 0.042, 0.45], click: [4600, 0.006, 0.26], grains: 6, grainF: 2900, ring: [900, 12, 0.09, 0.18], damp: 0.85 },
   fabric: { thud: [70, 0.055, 0.28], mid: [520, 0.6, 0.060, 0.26], click: [2600, 0.016, 0.06], grains: 0, ring: 0, damp: 0.4 },
@@ -68,7 +68,11 @@ function surfaceBody(g, ac, dest, t, fam, o) {
   const f = FAMILY[fam] || FAMILY.concrete;
   const hard = o.hard ?? 1;      // 0 soft footfall .. 1.6 bullet impact
   const bright = o.bright ?? 1;
-  const level = o.level ?? 1;
+  // `damp` is how much energy the surface gives back. Sand swallows a boot;
+  // corrugated metal returns more than you put in. Measured across the family
+  // table, without it every surface came out within 2 dB of every other and
+  // the whole point of having nine of them was lost.
+  const level = (o.level ?? 1) * f.damp;
 
   // thud
   if (f.thud[2] * level > 0.02) {
@@ -271,7 +275,7 @@ export function whizz(g, o = {}) {
   const miss = clamp(o.distance ?? 1.5, 0.2, 8);
   const level = clamp(1 - miss / 8, 0.1, 1);
   const side = o.side ?? (rnd() < 0.5 ? -1 : 1);
-  const route = g.local({ bus: 'world', gain: level * 0.55, send: 0.18, panner: true, pan: side * 0.85 });
+  const route = g.local({ bus: 'world', gain: level * 1.5, send: 0.18, panner: true, pan: side * 0.85 });
   if (!route) return;
   const t = route.when;
   const dur = 0.085 + miss * 0.012;
@@ -314,8 +318,8 @@ export function shell(g, o = {}) {
   const baseF = caliber === 'pistol' ? 4200 : caliber === 'shotgun' ? 1500 : 5200;
   const pitch = 0.82 + rnd() * 0.42;
   const route = o.local
-    ? g.local({ bus: 'foley', gain: 0.5, send: 0.26, panner: true, pan: (o.pan ?? 0.35) })
-    : g.spatial(o.x || 0, o.y || 0, o.z || 0, { bus: 'foley', gain: 1.2, ref: 5, rolloff: 1.6, send: 0.35 });
+    ? g.local({ bus: 'foley', gain: 1.35, send: 0.26, panner: true, pan: (o.pan ?? 0.35) })
+    : g.spatial(o.x || 0, o.y || 0, o.z || 0, { bus: 'foley', gain: 2.6, ref: 5, rolloff: 1.6, send: 0.35 });
   if (!route) return;
 
   const bounces = caliber === 'shotgun' ? 2 : 3 + (rnd() < 0.5 ? 1 : 0);
@@ -387,8 +391,9 @@ export function reload(g, stage, weaponId, o = {}) {
 
   if (s.includes('release') || s === 'drop' || s.includes('catch')) {
     // Mag catch: a small, very hard button click.
-    click(t, 3200, 9, 0.42, 0.014);
-    click(t + 0.004, 6400, 14, 0.20, 0.008);
+    click(t, 3200, 9, 1.15, 0.016);
+    click(t + 0.004, 6400, 14, 0.55, 0.010);
+    click(t + 0.001, 1250, 4, 0.55, 0.022);
   } else if (s.includes('out') || s.includes('remove')) {
     // Polymer scraping out of the well, then the loose rounds rattling.
     const src = noiseSource(ac, 'pink', 1, rnd);
@@ -396,9 +401,9 @@ export function reload(g, stage, weaponId, o = {}) {
     const env = gain(ac, 0);
     sweep(bp.frequency, t, 2100, 900, 0.13);
     src.connect(bp); bp.connect(env); env.connect(dest);
-    hit(env.gain, t, 0.30, 0.006, 0.14);
+    hit(env.gain, t, 0.62, 0.006, 0.14);
     fire(src, t, 0.18, () => { src.disconnect(); bp.disconnect(); env.disconnect(); });
-    for (let i = 0; i < 3; i++) click(t + 0.05 + rnd() * 0.12, 2400 + rnd() * 2200, 16, 0.08, 0.02);
+    for (let i = 0; i < 3; i++) click(t + 0.05 + rnd() * 0.12, 2400 + rnd() * 2200, 16, 0.22, 0.02);
     life = 0.5;
   } else if (s.includes('in') || s.includes('insert') || s.includes('new')) {
     // The hand arrives before the magazine does, so the cloth leads the thunk.
