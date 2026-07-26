@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {
   chamferBox, pipeGeo, corrugatedGeo, clothGeo, cableGeo, lumpGeo, projectUV, jitterColor,
+  twoSided, layFlat,
 } from './lib.js';
 
 /**
@@ -39,7 +40,7 @@ function geo() {
     barAlong: pipeGeo(0.03, 1, 6, false).rotateZ(Math.PI / 2),
     barOut: pipeGeo(0.028, 1, 6, false).rotateX(Math.PI / 2),
     post: pipeGeo(0.04, 1, 6, false),
-    sheet: corrugatedGeo(1, 1, 12, 0.016),
+    sheet: twoSided(layFlat(corrugatedGeo(1, 1, 12, 0.016))),
     canvas: null,        // built per-instance: the sag has to match the span
     tank: pipeGeo(0.62, 1.35, 12, true, 0.05),
     tankLid: pipeGeo(0.3, 0.1, 10, true, 0.02),
@@ -52,7 +53,7 @@ function geo() {
     parapet: chamferBox(1, 0.55, 0.26, 0.035),
     coping: chamferBox(1, 0.07, 0.34, 0.02),
     crate: chamferBox(0.62, 0.5, 0.44, 0.022),
-    shackWall: corrugatedGeo(1, 1, 10, 0.02),
+    shackWall: twoSided(corrugatedGeo(1, 1, 10, 0.02)),
     step: chamferBox(1.05, 0.05, 0.28, 0.008),
     rail: pipeGeo(0.022, 1, 5, false).rotateZ(Math.PI / 2),
     railPost: pipeGeo(0.02, 1, 5, false),
@@ -136,8 +137,11 @@ export function overheadLines(ctx, site, bs, rand, density = 1) {
             const cz = az + (far.z - az) * s + f.nz * 0.25 * (1 - 2 * s);
             const drop = Math.sin(Math.PI * s) * (0.6 + far.d * 0.05);
             const cw = 0.35 + rand() * 0.5, ch = 0.5 + rand() * 0.7;
-            const cloth = clothGeo(cw, ch, 0.1, rand, 0.12);
-            jitterColor(_c, rand, 0.3, 0.5, 0);
+            const cloth = twoSided(clothGeo(cw, ch, 0.1, rand, 0.12));
+            // Washing is the one thing in a dust-coloured street that is
+            // allowed real chroma, so it gets a wide hue spread and a lift.
+            jitterColor(_c, rand, 0.24, 0.62, 0);
+            _c.multiplyScalar(1.35);
             bs.add('fabric_canvas', cloth, cx, y - drop - ch * 0.5, cz,
               0, Math.atan2(ux, uz) + (rand() - 0.5) * 0.5, 0, 1, 1, 1, _c, true);
             parts++;
@@ -194,22 +198,23 @@ export function awnings(ctx, site, bs, rand, density = 1) {
       // why these go through addPitched rather than add: the default XYZ Euler
       // rotates about world X and stands the sheet on its edge on any wall that
       // does not face along Z.
-      const pitch = -Math.PI / 2 + Math.atan2(droop, depth);
+      const pitch = Math.atan2(droop, depth);
       if (metal) {
         jitterColor(_c, rand, 0.2, 0.05, 0.05);
         _c.multiplyScalar(0.82);
         bs.addPitched('metal_corrugated', g.sheet, cx + f.nx * depth * 0.5, y - droop * 0.5,
-          cz + f.nz * depth * 0.5, yaw, pitch, 0, w, depth * 1.08, 1, _c, true);
+          cz + f.nz * depth * 0.5, yaw, pitch, 0, w, 1, depth * 1.08, _c, true);
         parts++;
       } else {
-        const cloth = clothGeo(w, depth * 1.15, droop * 1.6, rand, 0.16);
-        jitterColor(_c, rand, 0.26, 0.28, 0.1);
+        const cloth = twoSided(layFlat(clothGeo(w, depth * 1.15, droop * 1.6, rand, 0.16)));
+        jitterColor(_c, rand, 0.26, 0.3, 0.12);
+        _c.multiplyScalar(1.12);
         bs.addPitched('fabric_canvas', cloth, cx + f.nx * depth * 0.5, y - droop * 0.4,
           cz + f.nz * depth * 0.5, yaw, pitch, 0, 1, 1, 1, _c, true);
         parts++;
         // A torn flap hanging off the front edge.
         if (rand() < 0.6) {
-          const flap = clothGeo(w * (0.25 + rand() * 0.4), 0.5 + rand() * 0.6, 0.06, rand, 0.3);
+          const flap = twoSided(clothGeo(w * (0.25 + rand() * 0.4), 0.5 + rand() * 0.6, 0.06, rand, 0.3));
           bs.add('fabric_canvas', flap, cx + ux * (rand() - 0.5) * w * 0.6 + f.nx * depth,
             y - droop - 0.3, cz + uz * (rand() - 0.5) * w * 0.6 + f.nz * depth,
             0, yaw, 0, 1, 1, 1, _c, true);

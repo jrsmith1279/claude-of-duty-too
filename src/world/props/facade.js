@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { chamferBox, pipeGeo, corrugatedGeo, lumpGeo, projectUV, jitterColor } from './lib.js';
+import { chamferBox, pipeGeo, corrugatedGeo, lumpGeo, projectUV, jitterColor, twoSided } from './lib.js';
 
 /**
  * Wall break-up — `ART_DIRECTION.md` rule 1: "no unbroken surface larger than
@@ -59,7 +59,7 @@ function geo() {
       projectUV(g);
       return g;
     })(),
-    shutter: corrugatedGeo(1, 1, 16, 0.012),
+    shutter: twoSided(corrugatedGeo(1, 1, 16, 0.012)),
     pipe: pipeGeo(0.055, 1, 8, false),
     // Rotated at build time so the unit length lies along local X (the facade
     // direction) or local Z (out of the wall); the placement helper only ever
@@ -344,14 +344,16 @@ function window_(bs, g, fr, f, t, yc, ww, wh, rand, wallTint) {
     // Blown glass: a few shards still gripped by the frame.
     const shards = 2 + ((rand() * 4) | 0);
     for (let i = 0; i < shards; i++) {
-      _c.setRGB(1.3, 1.34, 1.3);
+      // Barely-there glass: steel_brushed at metalness 1 mirrors the sky, and
+      // at full vertex value a shard in a shaded opening reads as a white slash.
+      _c.setRGB(0.62, 0.66, 0.66);
       const corner = i % 4;
       const sx = (corner & 1 ? 1 : -1) * ww * 0.28;
       const sy = (corner & 2 ? 1 : -1) * wh * 0.3;
       const x = f.ax + fr.ux * (fr.len * t + sx) + fr.nx * (-0.09);
       const z = f.az + fr.uz * (fr.len * t + sx) + fr.nz * (-0.09);
       bs.add('steel_brushed', g.shard, x, yc + sy, z, 0, fr.yaw + (rand() - 0.5) * 0.2,
-        rand() * 6.28, ww * (0.3 + rand() * 0.3), wh * (0.3 + rand() * 0.35), 1, _c, false);
+        rand() * 6.28, ww * (0.22 + rand() * 0.22), wh * (0.22 + rand() * 0.26), 1, _c, false);
       n++;
     }
   }

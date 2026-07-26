@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {
-  chamferBox, pipeGeo, corrugatedGeo, clothGeo, lumpGeo, projectUV, jitterColor, hash3,
+  chamferBox, pipeGeo, corrugatedGeo, clothGeo, lumpGeo, projectUV, jitterColor,
+  twoSided, layFlat,
 } from './lib.js';
 import { wallFalloff } from './layout.js';
 
@@ -92,7 +93,7 @@ function geo() {
     skipRib: cb(0.07, 1.0, 0.06, 0.014),
     skipWheel: pipeGeo(0.09, 0.06, 8, true, 0.015).rotateZ(Math.PI / 2),
     board: cb(1, 0.14, 0.028, 0.006),
-    sheet: corrugatedGeo(1, 1, 10, 0.018),
+    sheet: twoSided(layFlat(corrugatedGeo(1, 1, 10, 0.018))),
     lump: lumpGeo(0.5, 0.45, [1, 0.6, 1], 1, 9),
   };
   return G;
@@ -229,14 +230,15 @@ export function marketStall(bs, rand, x, y, z, yaw, colliders) {
     n++;
   }
 
-  // Canopy: torn canvas over the top rails, sagging in the middle.
-  const cloth = clothGeo(w * 1.2, d * 1.5, 0.16, rand, 0.2);
-  jitterColor(_c, rand, 0.28, 0.35, 0.08);
-  put('fabric_canvas', cloth, 0, h + 0.06, 0, -Math.PI / 2 + 0.12, 0, 1, 1, 1, _c);
+  // Canopy: torn canvas over the top rails, pitched off to one side to shed.
+  const cloth = twoSided(layFlat(clothGeo(w * 1.2, d * 1.5, 0.16, rand, 0.2)));
+  jitterColor(_c, rand, 0.24, 0.42, 0.1);
+  _c.multiplyScalar(1.2);
+  put('fabric_canvas', cloth, 0, h + 0.06, 0, 0.16, (rand() - 0.5) * 0.2, 1, 1, 1, _c);
   n++;
   // A side curtain hanging off one end.
   if (rand() < 0.7) {
-    const side = clothGeo(d * 1.1, h * 0.55, 0.06, rand, 0.3);
+    const side = twoSided(clothGeo(d * 1.1, h * 0.55, 0.06, rand, 0.3));
     put('fabric_canvas', side, (rand() < 0.5 ? -1 : 1) * w / 2, h - h * 0.28, 0,
       0, 0, 1, 1, 1, _c);
     n++;
@@ -414,8 +416,8 @@ function smallJunk(bs, rand, x, y, z, colliders) {
   } else {
     jitterColor(_c, rand, 0.3, 0.08, 0.06);
     const w = 0.7 + rand() * 0.9;
-    bs.addPitched('metal_corrugated', g.sheet, x, y + 0.03, z, yaw, -Math.PI / 2 + 0.1, 0,
-      w, w * 0.7, 1, _c, false);
+    bs.addPitched('metal_corrugated', g.sheet, x, y + 0.03, z, yaw, 0.1, 0,
+      w, 1, w * 0.7, _c, false);
   }
   void colliders;
   return 1;
@@ -459,7 +461,7 @@ export function streetFurniture(ctx, site, bs, rand, density = 1) {
   const streetYaw = site.facades.length
     ? Math.atan2(site.facades[0].bx - site.facades[0].ax, site.facades[0].bz - site.facades[0].az)
     : 0;
-  const cars = Math.max(1, Math.round(3 * density));
+  const cars = Math.max(1, Math.round(5 * density));
   for (let i = 0; i < cars; i++) {
     const p = spot(road, 2.5, 60);
     if (!p) break;

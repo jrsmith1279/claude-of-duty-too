@@ -375,6 +375,58 @@ export function pipeGeo(r, len, radial = 8, capped = true, chamfer = 0) {
   return geo;
 }
 
+/**
+ * Returns a copy of a thin surface with both facings present.
+ *
+ * Awnings, canopies, laundry and shutters are single quads, and a merged batch
+ * cannot set `side` per instance — the material is shared by the whole bucket
+ * and turning off backface culling for every prop would cost real fill rate.
+ * Duplicating the ~50 triangles of a sheet is by far the cheaper answer, and it
+ * is the difference between standing under an awning and standing under a hole.
+ */
+export function twoSided(geo) {
+  const src = geo.index ? geo.toNonIndexed() : geo;
+  const sp = src.attributes.position.array;
+  const sn = src.attributes.normal ? src.attributes.normal.array : null;
+  const su = src.attributes.uv ? src.attributes.uv.array : null;
+  const n = sp.length / 3;
+  const pos = new Float32Array(n * 6);
+  const nrm = new Float32Array(n * 6);
+  const uv = new Float32Array(n * 4);
+  pos.set(sp, 0);
+  if (sn) nrm.set(sn, 0);
+  if (su) uv.set(su, 0);
+  // Second copy with the winding and the normals reversed.
+  for (let t = 0; t < n; t += 3) {
+    for (let k = 0; k < 3; k++) {
+      const src3 = (t + (2 - k)) * 3, dst3 = (n + t + k) * 3;
+      pos[dst3] = sp[src3]; pos[dst3 + 1] = sp[src3 + 1]; pos[dst3 + 2] = sp[src3 + 2];
+      if (sn) { nrm[dst3] = -sn[src3]; nrm[dst3 + 1] = -sn[src3 + 1]; nrm[dst3 + 2] = -sn[src3 + 2]; }
+      const src2 = (t + (2 - k)) * 2, dst2 = (n + t + k) * 2;
+      if (su) { uv[dst2] = su[src2]; uv[dst2 + 1] = su[src2 + 1]; }
+    }
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+  out.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  return out;
+}
+
+/**
+ * Lays a sheet authored in the XY plane flat, normal up, with its former
+ * "height" axis running out along +Z.
+ *
+ * The two rotations are not interchangeable with one: a single rotateX puts the
+ * depth axis where it is wanted but leaves the front face pointing at the
+ * ground, because X cross Y is Z and the handedness does not care what was
+ * intended. The extra half turn about Y fixes the facing without disturbing the
+ * depth axis.
+ */
+export function layFlat(geo) {
+  return geo.rotateX(-Math.PI / 2).rotateY(Math.PI);
+}
+
 // ------------------------------------------------------------------ merging
 
 /**
