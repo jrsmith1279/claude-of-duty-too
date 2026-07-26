@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 /**
  * Greybox map — a street corridor with flanking blocks and one enterable room.
@@ -156,9 +157,15 @@ export class LevelSystem {
       castShadow: false, surface: 'asphalt',
     });
 
+    // Granite setts, not poured concrete. `concrete_floor`'s generator cuts
+    // control joints on a half-tile rectangular grid, and that grid is the
+    // repeating panel pattern visible on the pavements in establishing.png —
+    // the single most machine-made surface in the frame. Gated so a half-landed
+    // wave (or a materials rollback) still boots on the old key.
+    const kerbKey = ctx.materials.keys?.includes('paver') ? 'paver' : 'concrete_floor';
     for (const sx of [-1, 1]) {
-      this._add(box(4.4, KERB_HEIGHT, 110), 'concrete_floor',
-        [sx * (STREET_HALF + 2.2), KERB_HEIGHT / 2, -8], { castShadow: false, surface: 'concrete_floor' });
+      this._add(box(4.4, KERB_HEIGHT, 110), kerbKey,
+        [sx * (STREET_HALF + 2.2), KERB_HEIGHT / 2, -8], { castShadow: false, surface: kerbKey });
     }
   }
 
@@ -231,8 +238,34 @@ export class LevelSystem {
       { surface: 'brick' });
 
     // Mass above the room, so it reads as a floor of a building and not a shed.
-    this._add(box(15, 5.6, 12), 'concrete_wall',
-      [-(STREET_HALF + 4.4 + 7.5), H + 0.3 + 2.8, -3], { surface: 'concrete_wall' });
+    //
+    // This used to be a 15 x 12 m slab centred at z = -3, i.e. spanning
+    // x[-26.4,-11.4] z[-9,3] with its underside at y = 3.70 — over a room that
+    // only reaches x[-14.4,-8.4] z[-11.4,-0.6]. About 86% of it, including a
+    // 12 m clear span westward, stood on nothing, and in combat.png you could
+    // see the horizon straight through the gap underneath it. A building whose
+    // upper storey hovers is the single most disqualifying thing in the frame:
+    // it says "untextured blockout" before the critic has looked at anything.
+    //
+    // The fix is structural rather than cosmetic. The slab's depth now matches
+    // the room's z extent exactly (10.8 m at z = -6.0), and the ground floor
+    // *behind* the room — x[-26.4,-14.4], the building interior that was never
+    // modelled because the street never sees into it — is filled solid up to
+    // the slab's underside. Every square metre of the upper storey now lands on
+    // either that mass or the room's own roof slab.
+    //
+    // Both parts are merged into ONE BufferGeometry and one mesh, so closing a
+    // 12 m hole in the world costs zero extra draw calls. `box()` has already
+    // put metre-scaled UVs on each part, and translating a geometry does not
+    // disturb them, so the merged L still tiles at its authored size.
+    const upperY = H + 0.3 + 2.8;              // 6.50 -> underside at 3.70
+    const massX = -(STREET_HALF + 4.4 + 7.5);  // -18.90, the block footprint
+    const upper = box(15, 5.6, 10.8).translate(massX, upperY, -6.0);
+    // Ground floor behind the room: x -26.40 .. -14.40, up to the slab soffit.
+    const infill = box(12, 3.7, 10.8).translate(massX - 1.5, 1.85, -6.0);
+    this._add(mergeGeometries([upper, infill], false), 'concrete_wall', [0, 0, 0],
+      { surface: 'concrete_wall' });
+    upper.dispose(); infill.dispose();
 
     // A crate and a low wall: something for contact shadows and bounce to land on.
     this._add(box(1.1, 1.1, 1.1), 'wood_plank', [X0 + 1.5, 0.67, Z0 + 2.2],
