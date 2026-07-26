@@ -278,11 +278,14 @@ export class Viewmodel {
     this.swayPos.update(dt, 0, 0, 0);
 
     // --- breathing + slow drift -------------------------------------------
-    const breathAmp = (a > 0.5 ? 0.0016 : 0.0036) * (1 - this.sprintW * 0.5);
+    // Amplitudes drop hard under ADS: 1 mm at 0.2 m eye relief is already
+    // 5 mrad of aim wobble, which is about right for a held breath and about
+    // as much as the reticle can move before it reads as a bug.
+    const breathAmp = lerp(0.0036, 0.0009, a) * (1 - this.sprintW * 0.5);
     const bt = this.time * 0.31;
     const breath = Math.sin(bt * Math.PI * 2) * 0.6 + this.breathe.at(bt * 1.7) * 0.4;
-    const driftX = this.drift.at(this.time * 0.23) * (a > 0.5 ? 0.0011 : 0.0026);
-    const driftY = this.drift.at(this.time * 0.19 + 31) * (a > 0.5 ? 0.0009 : 0.0022);
+    const driftX = this.drift.at(this.time * 0.23) * lerp(0.0026, 0.0006, a);
+    const driftY = this.drift.at(this.time * 0.19 + 31) * lerp(0.0022, 0.0005, a);
 
     // --- movement bob ------------------------------------------------------
     const moveW = clamp(s.speed01, 0, 1.4);
@@ -416,7 +419,7 @@ export class Viewmodel {
 
     // Selector rotates to the current fire mode.
     if (p.selector) {
-      const idx = def.modes.indexOf(this._fireMode || def.fireMode);
+      const idx = Math.max(0, def.modes.indexOf(this._fireMode || def.fireMode));
       p.selector.group.rotation.x = approach(p.selector.group.rotation.x, -0.7 + idx * 0.7, 14, dt);
     }
   }

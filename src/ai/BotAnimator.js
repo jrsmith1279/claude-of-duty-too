@@ -111,6 +111,7 @@ class Foot {
     this.duration = 0.3;
     this.lift = 0.08;
     this.pitch = 0;
+    this.heel = 0;
   }
 }
 
@@ -359,9 +360,16 @@ export class BotAnimator {
     const c = Math.cos(this.yaw), sn = Math.sin(this.yaw);
     for (const f of this.feet) {
       const S = f.side < 0 ? 'L' : 'R';
-      // Sole (world) -> ankle target (rig space).
+      // Sole (world) -> ankle target (rig space). A raised heel pivots the
+      // ankle up and forward over the ball of the foot.
       const wx = f.pos.x - s.pos.x, wz = f.pos.z - s.pos.z;
-      _a.set(c * wx - sn * wz, f.pos.y - s.pos.y + ANKLE_Y, sn * wx + c * wz);
+      const heel = f.heel || 0;
+      const yawRel0 = shortAngle(f.plantYaw - this.yaw);
+      _a.set(
+        c * wx - sn * wz + Math.sin(yawRel0) * heel * 0.045,
+        f.pos.y - s.pos.y + ANKLE_Y + heel * 0.088,
+        sn * wx + c * wz + Math.cos(yawRel0) * heel * 0.045,
+      );
 
       const thighRest = f.side < 0 ? REST.thighL : REST.thighR;
       _b.copy(thighRest).sub(REST.hips).applyQuaternion(this._Q.hips).add(this._P.hips);
