@@ -548,10 +548,11 @@ export class BotAnimator {
     _c.copy(SIGHT).applyQuaternion(_q0);
     _b.sub(_c);                                              // aimed weapon origin
 
-    // Low-ready pose, in rig space: held across the body, muzzle down.
-    _eu.set(-0.62 + ap * 0.35, ay * 0.55 - 0.16, 0.32, 'YXZ');
+    // Low-ready pose, in rig space: carried out in front across the body,
+    // muzzle down. Far enough forward that the arms extend rather than fold.
+    _eu.set(-0.46 + ap * 0.35, ay * 0.55 - 0.14, 0.24, 'YXZ');
     _q1.setFromEuler(_eu);
-    _d.set(0.150 + bobX, 1.150 - crouch * 0.19 + bobY, 0.180 - crouch * 0.02);
+    _d.set(0.120 + bobX, 1.075 - crouch * 0.19 + bobY, 0.285 - crouch * 0.02);
     _d.y += this.hipSpring.x - s.pos.y - STANCE.stand.hip;
 
     this._weaponP.lerpVectors(_d, _b, aim);
@@ -610,9 +611,10 @@ export class BotAnimator {
     _b.copy(armRest).sub(shoulderRest).applyQuaternion(_q0);
     _d.copy(shoulderRest).sub(REST.chest).applyQuaternion(this._Q.chest).add(this._P.chest).add(_b);
 
-    // Elbow points down, out and back — never up, which is the tell for a
-    // naive IK arm.
-    _c.set(left ? -0.75 : 0.75, -0.92, -0.45 + crouch * 0.1).normalize();
+    // Elbow hangs. The pole has to be dominated by -Y: with a grip close to
+    // the chest a laterally-weighted pole throws both elbows out horizontally
+    // and the bot reads as a scarecrow, which is exactly what it did.
+    _c.set(left ? -0.26 : 0.30, -1.0, -0.30 + crouch * 0.1).normalize();
     solveTwoBone(_d, _a, LIMB.upperArm, LIMB.forearm, _c, _e, _f);
 
     const arm = this.bone('arm' + S);

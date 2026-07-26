@@ -319,7 +319,7 @@ function buildBody() {
   // pinch when the arm comes up to a firing position.
   for (const s of [-1, 1]) {
     const S = s < 0 ? 'L' : 'R';
-    b.add(sphere(0.082, 10, 8), at(s * 0.186, 1.452, 0, 0, 0, 0, 1.0, 1.05, 1.0),
+    b.add(sphere(0.076, 10, 8), at(s * 0.186, 1.452, 0, 0, 0, 0, 1.0, 1.05, 1.0),
       C.fatigueDark, rigid('arm' + S));
     b.add(limb(0.062, 0.050, 0.272), at(s * 0.190, 1.446, 0.004), C.fatigue,
       blendY('arm' + S, 'forearm' + S, 1.245, 1.172));
@@ -333,13 +333,15 @@ function buildBody() {
   // Legs.
   for (const s of [-1, 1]) {
     const S = s < 0 ? 'L' : 'R';
-    b.add(limb(0.108, 0.082, 0.435, 9), at(s * 0.096, 0.932, 0.004), C.fatigue,
+    // Combat trousers, not tights: the legs were reading as two poles with a
+    // stripe of bright street between them.
+    b.add(limb(0.122, 0.094, 0.435, 9), at(s * 0.096, 0.932, 0.004), C.fatigue,
       blendY('thigh' + S, 'shin' + S, 0.585, 0.495));
-    b.add(sphere(0.078, 9, 7), at(s * 0.100, 0.495, 0.008), C.fatigue, rigid('shin' + S));
-    b.add(limb(0.083, 0.062, 0.330, 9), at(s * 0.100, 0.492, 0.006), C.fatigue,
+    b.add(sphere(0.086, 9, 7), at(s * 0.100, 0.495, 0.008), C.fatigue, rigid('shin' + S));
+    b.add(limb(0.094, 0.070, 0.330, 9), at(s * 0.100, 0.492, 0.006), C.fatigue,
       blendY('shin' + S, 'foot' + S, 0.260, 0.190));
     // Blousing over the boot: a distinct step in the silhouette at the ankle.
-    b.add(limb(0.078, 0.070, 0.075, 9), at(s * 0.100, 0.180, 0.002), C.fatigueDark,
+    b.add(limb(0.088, 0.079, 0.078, 9), at(s * 0.100, 0.182, 0.002), C.fatigueDark,
       rigid('shin' + S));
   }
   return b.finish();
