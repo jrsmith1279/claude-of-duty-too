@@ -360,7 +360,43 @@ export class PropSystem {
     if (api && !api.setPropDensity) {
       api.setPropDensity = (v) => this.setDensity(v);
       api.propStats = () => this.stats;
+      api.propField = (name) => this._dumpField(name);
     }
+  }
+
+  /**
+   * ASCII dump of one of the survey's scalar fields, for eyeballing.
+   *
+   * `site.lee` is a new survey pass that six placement fields will depend on,
+   * and its failure mode is silent: if the wind vector comes out perpendicular
+   * to the street, every drift in the map points the wrong way and the frame
+   * still renders happily. Text is enough to check that, costs no GPU, and
+   * this returns null unless something asks for it.
+   */
+  _dumpField(name = 'lee') {
+    const s = this.site;
+    const arr = s && s[name];
+    if (!arr || !arr.length) return null;
+    const RAMP = ' .:-=+*#%@';
+    let max = 0;
+    for (let i = 0; i < arr.length; i++) if (arr[i] > max) max = arr[i];
+    const rows = [];
+    for (let iz = 0; iz < s.nz; iz += 2) {
+      let line = '';
+      for (let ix = 0; ix < s.nx; ix++) {
+        const i = s.index(ix, iz);
+        if (!s.open[i]) { line += '█'; continue; }
+        const t = max > 0 ? arr[i] / max : 0;
+        line += RAMP[Math.min(RAMP.length - 1, Math.round(t * (RAMP.length - 1)))];
+      }
+      rows.push(line);
+    }
+    return {
+      name, max, nx: s.nx, nz: s.nz,
+      windYaw: s.windYaw, windX: s.windX, windZ: s.windZ,
+      facade0: s.facades[0] || null,
+      rows,
+    };
   }
 
   dispose() {

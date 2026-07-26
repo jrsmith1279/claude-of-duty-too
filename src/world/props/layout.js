@@ -89,6 +89,13 @@ export class Site {
     this.step = new Float32Array(n);      // biggest height step to a neighbour
     this.surf = new Array(n).fill('asphalt');
     this.taken = new Float32Array(n);     // radius of the prop occupying the cell
+    this.lee = new Float32Array(n);       // 0..4 sheltered-ness downwind of an obstruction
+    this.gutter = new Float32Array(n);    // 0..1 proximity to a kerb / height step
+    this.kerbDist = new Float32Array(n).fill(60);  // metres to the nearest step
+    /** Prevailing wind, radians. One direction shared by every consumer. */
+    this.windYaw = 0;
+    this.windX = 0;
+    this.windZ = 1;
 
     /** @type {{ax:number,az:number,bx:number,bz:number,nx:number,nz:number,len:number,top:number,base:number,surface:string}[]} */
     this.facades = [];
@@ -239,6 +246,154 @@ export class Site {
     this._probeWalls();
     this._findFacades();
     this._findRoofs();
+    this.buildShelter();
+    this.buildGutter();
+    return this;
+  }
+
+  /**
+   * Where the wind does not reach, and therefore where loose material piles up.
+   *
+   * Real streets are asymmetric in one consistent direction: drifts of grit,
+   * leaves and litter bank on the downwind side of every kerb, step, wall base
+   * and parked object, and they all bank the *same way*, because there is only
+   * one prevailing wind. Placing each drift with an independent random
+   * orientation is one of the strongest tells that a scene was generated
+   * rather than photographed — so one direction is computed here and every
+   * consumer reads it, rather than each rolling its own.
+   *
+   * The direction is the long axis of the largest facade, i.e. along the
+   * street: wind channels down a street canyon, it does not blow through the
+   * buildings. `facades` is sorted by length, so `facades[0]` is the longest.
+   *
+   * The field itself is a single upwind sweep. Cells are visited in order of
+   * their projection onto the wind vector, so a cell's upwind neighbours are
+   * always already final; shelter is inherited from upwind at 0.86 per metre
+   * (an e-fold over about 6.6 m), seeded at 1.0 immediately downwind of
+   * anything blocked and topped up by the local height step. O(n) over ~11 k
+   * cells, plus one sort — sub-millisecond, once, at init.
+   *
+   * @param {number} [windYaw] override, radians; defaults to along the street
+   */
+  buildShelter(windYaw) {
+    const { nx, nz, open, step, taken, lee } = this;
+    lee.fill(0);
+
+    if (windYaw === undefined) {
+      const f = this.facades[0];
+      if (f) {
+        const ux = f.bx - f.ax, uz = f.bz - f.az;
+        const l = Math.hypot(ux, uz) || 1;
+        windYaw = Math.atan2(ux / l, uz / l);
+      } else {
+        // No surveyed facade: blow along whichever way the map is longer.
+        windYaw = nz >= nx ? 0 : Math.PI / 2;
+      }
+    }
+    this.windYaw = windYaw;
+    const wx = Math.sin(windYaw), wz = Math.cos(windYaw);
+    this.windX = wx;
+    this.windZ = wz;
+
+    // Visit order: strictly increasing along the wind, so both upwind
+    // neighbours of any cell have been finalised before it is read.
+    const order = [];
+    for (let i = 0; i < open.length; i++) if (open[i]) order.push(i);
+    const proj = new Float32Array(open.length);
+    for (const i of order) {
+      const ix = i % nx, iz = (i / nx) | 0;
+      proj[i] = ix * GRID_STEP * wx + iz * GRID_STEP * wz;
+    }
+    order.sort((a, b) => proj[a] - proj[b]);
+
+    const ax = Math.abs(wx), az = Math.abs(wz);
+    const sx = wx >= 0 ? 1 : -1, sz = wz >= 0 ? 1 : -1;
+    const wsum = ax + az || 1;
+
+    for (const i of order) {
+      const ix = i % nx, iz = (i / nx) | 0;
+      // Two axis neighbours weighted by the wind's components, so a diagonal
+      // wind does not quantise onto one axis and produce a staircase.
+      let acc = 0;
+      if (ax > 1e-4) acc += ax * this._upwindTerm(ix - sx, iz);
+      if (az > 1e-4) acc += az * this._upwindTerm(ix, iz - sz);
+      const v = acc / wsum + step[i] * 2.2;
+      lee[i] = v < 0 ? 0 : v > 4 ? 4 : v;
+    }
+    return this;
+  }
+
+  /**
+   * Shelter contributed by one upwind neighbour: inherited, or seeded if the
+   * neighbour blocks the wind.
+   *
+   * Off-map reads as 0, not as a seed. The alternative puts a 6 m band of
+   * unexplained drift across the upwind edge of the map for no reason — wind
+   * arrives from open ground, it is not sheltered by the edge of the grid.
+   *
+   * The `taken` branch is inert during `survey()`, where nothing has been
+   * placed yet; it exists so a consumer may re-run `buildShelter()` after
+   * placing large props and have them cast their own lee.
+   */
+  _upwindTerm(ix, iz) {
+    if (!this.inside(ix, iz)) return 0;
+    const u = this.index(ix, iz);
+    if (!this.open[u]) return 1.0;                // wall, kerb face or building
+    if (this.taken[u] > 0) return 1.0;            // a placed prop casts its own lee
+    return this.lee[u] * 0.86;
+  }
+
+  /**
+   * Distance-to-kerb, as a 0..1 weight. Silt, grit and standing water collect
+   * in the 20-30 cm strip against a kerb face, and that strip reads in a photo
+   * long before any individual piece of debris does.
+   *
+   * Kerbs are deliberately invisible to `dist`: anything under a metre tall is
+   * walkable and therefore not an obstruction, which is right for placement and
+   * useless here. So the same two-pass chamfer runs again, seeded on cells that
+   * carry a height step instead of on blocked cells.
+   *
+   * CAVEAT for consumers: with a 0.30 m falloff on a 1 m grid, `gutter` is in
+   * practice a one-cell binary mask — the first ring out is already at 0.036.
+   * That is fine for "am I in the gutter", useless as a gradient. Anything that
+   * wants a wider band should read `kerbDist` (metres to the nearest height
+   * step, 60 where there is none) and shape its own falloff.
+   */
+  buildGutter(seedStep = 0.04, falloff = 0.30) {
+    const { nx, nz, open, step, gutter } = this;
+    const BIG = 1e4;
+    const A = GRID_STEP, B = GRID_STEP * 1.41421356;
+    const d = this.kerbDist || (this.kerbDist = new Float32Array(open.length));
+    for (let i = 0; i < d.length; i++) d[i] = step[i] > seedStep ? 0 : BIG;
+
+    for (let iz = 0; iz < nz; iz++) {
+      for (let ix = 0; ix < nx; ix++) {
+        const i = iz * nx + ix;
+        if (!open[i]) continue;
+        let v = d[i];
+        if (ix > 0) v = Math.min(v, d[i - 1] + A);
+        if (iz > 0) v = Math.min(v, d[i - nx] + A);
+        if (ix > 0 && iz > 0) v = Math.min(v, d[i - nx - 1] + B);
+        if (ix < nx - 1 && iz > 0) v = Math.min(v, d[i - nx + 1] + B);
+        d[i] = v;
+      }
+    }
+    for (let iz = nz - 1; iz >= 0; iz--) {
+      for (let ix = nx - 1; ix >= 0; ix--) {
+        const i = iz * nx + ix;
+        if (!open[i]) continue;
+        let v = d[i];
+        if (ix < nx - 1) v = Math.min(v, d[i + 1] + A);
+        if (iz < nz - 1) v = Math.min(v, d[i + nx] + A);
+        if (ix < nx - 1 && iz < nz - 1) v = Math.min(v, d[i + nx + 1] + B);
+        if (ix > 0 && iz < nz - 1) v = Math.min(v, d[i + nx - 1] + B);
+        d[i] = v;
+      }
+    }
+    for (let i = 0; i < d.length; i++) {
+      if (!open[i] || d[i] > 900) { d[i] = 60; gutter[i] = 0; continue; }
+      gutter[i] = Math.exp(-d[i] / falloff);
+    }
     return this;
   }
 
@@ -467,6 +622,18 @@ export class Site {
     return i < 0 ? 0 : this.dist[i];
   }
 
+  /** 0..4 shelter from the prevailing wind. High = drifts settle here. */
+  leeAt(x, z) {
+    const i = this.cellAt(x, z);
+    return i < 0 ? 0 : this.lee[i];
+  }
+
+  /** 0..1 proximity to a kerb face or height step. */
+  gutterAt(x, z) {
+    const i = this.cellAt(x, z);
+    return i < 0 ? 0 : this.gutter[i];
+  }
+
   /** True while nothing bigger has claimed the disc at (x,z). */
   free(x, z, r) {
     const ix0 = this.ixOf(x - r), ix1 = this.ixOf(x + r);
@@ -498,10 +665,13 @@ export class Site {
   /**
    * A cumulative-weight sampler over the open cells.
    *
-   * `weight(dist, corner, surface, x, z, indoor)` returns the relative density
-   * at a cell; the returned object can be sampled thousands of times in O(log n)
-   * with no allocation. This is where "debris accumulates where it is not walked
-   * on" is actually expressed.
+   * `weight(dist, corner, surface, x, z, indoor, step, lee, gutter)` returns
+   * the relative density at a cell; the returned object can be sampled
+   * thousands of times in O(log n) with no allocation. This is where "debris
+   * accumulates where it is not walked on" is actually expressed.
+   *
+   * Arguments are only ever APPENDED to this callback, so every existing
+   * caller keeps working unchanged.
    */
   field(weight) {
     const n = this.open.length;
@@ -511,7 +681,10 @@ export class Site {
     for (let i = 0; i < n; i++) {
       if (!this.open[i]) continue;
       const ix = i % this.nx, iz = (i / this.nx) | 0;
-      const w = weight(this.dist[i], this.corner[i], this.surf[i], this.xOf(ix), this.zOf(iz), this.indoor[i], this.step[i]);
+      const w = weight(
+        this.dist[i], this.corner[i], this.surf[i], this.xOf(ix), this.zOf(iz),
+        this.indoor[i], this.step[i], this.lee[i], this.gutter[i],
+      );
       if (!(w > 0)) continue;
       total += w;
       idx.push(i);
@@ -528,7 +701,10 @@ export class Field {
     this.idx = idx;
     this.cum = cum;
     this.total = total;
-    this.out = { x: 0, y: 0, z: 0, dist: 0, corner: 0, surface: 'asphalt', nx: 0, nz: 0, indoor: 0, step: 0 };
+    this.out = {
+      x: 0, y: 0, z: 0, dist: 0, corner: 0, surface: 'asphalt',
+      nx: 0, nz: 0, indoor: 0, step: 0, lee: 0, gutter: 0,
+    };
   }
 
   get empty() { return this.total <= 0; }
@@ -554,6 +730,8 @@ export class Field {
     o.surface = site.surf[i];
     o.indoor = site.indoor[i];
     o.step = site.step[i];
+    o.lee = site.lee[i];
+    o.gutter = site.gutter[i];
     o.nx = site.wallN[i * 2];
     o.nz = site.wallN[i * 2 + 1];
     return o;
