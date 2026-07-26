@@ -157,7 +157,7 @@ export function burntCar(bs, rand, x, y, z, yaw, colliders) {
         _c.setRGB(0.5, 0.49, 0.49);
         put('rubber', g.wheel, sx * 0.86, 0.3, oz, 0, 0, 0, 1, 0.62, 1, _c);
         _c.setRGB(0.72, 0.7, 0.68);
-        put('steel_brushed', g.rim, sx * 0.9, 0.3, oz, 0, 0, 0, 1, 1, 1, _c, false);
+        put('metal_painted', g.rim, sx * 0.9, 0.3, oz, 0, 0, 0, 1, 1, 1, _c, false);
       } else {
         // The corner it is missing sits on the brake drum.
         _c.setRGB(0.55, 0.5, 0.46);
@@ -389,7 +389,7 @@ function dumpster(bs, rand, x, y, z, yaw, colliders) {
   for (let i = 0, k = 3 + ((rand() * 5) | 0); i < k; i++) {
     const ox = (rand() - 0.5) * 1.7, oz = (rand() - 0.5) * 0.9;
     jitterColor(_c, rand, 0.35, 0.12, 0.06);
-    bs.addPitched(rand() < 0.5 ? 'plywood' : 'wood_plank', g.lump,
+    bs.addPitched('wood_plank', g.lump,
       x + ox * c + oz * s, y + 1.12 + rand() * 0.16, z - ox * s + oz * c,
       rand() * 3, (rand() - 0.5), 0, 0.3 + rand() * 0.4, 0.22, 0.3 + rand() * 0.3, _c, false);
     n++;

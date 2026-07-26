@@ -271,7 +271,7 @@ export function rooftops(ctx, site, bs, rand, density = 1) {
       jitterColor(_c, rand, 0.16, 0.04, 0.02);
       _c.multiplyScalar(1.08);
       bs.add('metal_painted', g.acBig, x, y + 0.16 + 0.425 * sc, z, 0, yaw, 0, sc, sc, sc, _c, true);
-      bs.add('steel_brushed', g.acLouvre, x, y + 0.16 + 0.86 * sc, z, 0, yaw, 0, sc, 1, sc, _c, false);
+      bs.add('metal_painted', g.acLouvre, x, y + 0.16 + 0.86 * sc, z, 0, yaw, 0, sc, 1, sc, _c, false);
       bs.add('metal_rusted', g.acFan, x, y + 0.16 + 0.9 * sc, z, 0, yaw, 0, sc, 1, sc, _c, false);
       parts += 4;
     }

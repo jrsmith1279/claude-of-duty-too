@@ -240,7 +240,7 @@ export function facadeDetail(ctx, site, bs, rand, density = 1) {
       jitterColor(_c, rand, 0.16, 0.03, 0.04);
       _c.multiplyScalar(1.1);
       put(bs, 'metal_painted', g.ac, fr, f, t, y, 0.2, 1, 1, 1, _c, true);
-      put(bs, 'steel_brushed', g.acGrille, fr, f, t, y, 0.375, 1, 1, 1, _c, false);
+      put(bs, 'metal_painted', g.acGrille, fr, f, t, y, 0.375, 1, 1, 1, _c, false);
       for (const s of [-1, 1]) {
         const off = s * 0.44;
         const x = f.ax + fr.ux * (fr.len * t + off) + fr.nx * 0.19;
@@ -305,7 +305,7 @@ function window_(bs, g, fr, f, t, yc, ww, wh, rand, wallTint) {
   n += 2;
 
   // Frame.
-  const frameKey = rand() < 0.55 ? 'wood_painted' : 'metal_painted';
+  const frameKey = rand() < 0.55 ? 'wood_plank' : 'metal_painted';
   jitterColor(_c, rand, 0.28, 0.1, 0.03);
   for (const s of [-1, 1]) {
     const off = s * (ww / 2 - 0.03);
@@ -344,15 +344,17 @@ function window_(bs, g, fr, f, t, yc, ww, wh, rand, wallTint) {
     // Blown glass: a few shards still gripped by the frame.
     const shards = 2 + ((rand() * 4) | 0);
     for (let i = 0; i < shards; i++) {
-      // Barely-there glass: steel_brushed at metalness 1 mirrors the sky, and
-      // at full vertex value a shard in a shaded opening reads as a white slash.
+      // Glass shards ride the metal_painted bucket, lightly tinted. The real
+      // glass keys are transmissive, which needs a scene copy every frame for
+      // six triangles, and steel_brushed at metalness 1 mirrors the sky so hard
+      // that a shard in a shaded opening reads as a white slash.
       _c.setRGB(0.62, 0.66, 0.66);
       const corner = i % 4;
       const sx = (corner & 1 ? 1 : -1) * ww * 0.28;
       const sy = (corner & 2 ? 1 : -1) * wh * 0.3;
       const x = f.ax + fr.ux * (fr.len * t + sx) + fr.nx * (-0.09);
       const z = f.az + fr.uz * (fr.len * t + sx) + fr.nz * (-0.09);
-      bs.add('steel_brushed', g.shard, x, yc + sy, z, 0, fr.yaw + (rand() - 0.5) * 0.2,
+      bs.add('metal_painted', g.shard, x, yc + sy, z, 0, fr.yaw + (rand() - 0.5) * 0.2,
         rand() * 6.28, ww * (0.22 + rand() * 0.22), wh * (0.22 + rand() * 0.26), 1, _c, false);
       n++;
     }

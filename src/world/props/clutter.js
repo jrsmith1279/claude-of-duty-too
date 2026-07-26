@@ -177,7 +177,7 @@ const KINDS = {
   plaster: { key: 'plaster', value: 0.28, hue: 0.04, warm: 0.07, tone: 1.05, flat: 0.75, h: 0.09, shadow: 0 },
   splinter: { key: 'wood_plank', value: 0.34, hue: 0.07, warm: 0.06, tone: 1.1, flat: 0.7, h: 0.05, shadow: 0 },
   plank: { key: 'wood_plank', value: 0.3, hue: 0.07, warm: 0.05, tone: 1.1, flat: 0.9, h: 0.03, shadow: 0 },
-  card: { key: 'plywood', value: 0.3, hue: 0.06, warm: 0.07, tone: 1.0, flat: 0.92, h: 0.02, shadow: 0 },
+  card: { key: 'wood_plank', value: 0.3, hue: 0.06, warm: 0.07, tone: 1.0, flat: 0.92, h: 0.02, shadow: 0 },
   paper: { key: 'plaster', value: 0.16, hue: 0.02, warm: 0.03, tone: 0.95, flat: 0.95, h: 0.01, shadow: 0 },
   twist: { key: 'metal_rusted', value: 0.36, hue: 0.1, warm: 0.1, tone: 1.14, flat: 0.6, h: 0.04, shadow: 0 },
   rebar: { key: 'metal_rusted', value: 0.34, hue: 0.09, warm: 0.09, tone: 1.12, flat: 0.75, h: 0.03, shadow: 0 },
@@ -291,16 +291,18 @@ export function scatterGround(ctx, site, bs, rand, density = 1) {
   const road = site.field((d, corner, surf) =>
     (d < 2.4 || d > 12 ? 0 : 1) * ((surf === 'asphalt' || surf === 'asphalt_worn') ? 1 : 0.25));
   if (!road.empty) {
-    run(road, N(420), 'grit', P.grit, 0.6, 1.6, 0.55);
-    run(road, N(230), 'chunk', P.chunk, 0.35, 0.95, 0.4);
-    run(road, N(190), 'brickHalf', P.brickHalf, 0.6, 1.2, 0.45);
-    run(road, N(140), 'plaster', P.plaster, 0.45, 1.2, 0.5);
-    run(road, N(120), 'slabSmall', P.slabSmall, 0.5, 1.1, 0.55);
-    run(road, N(95), 'splinter', P.splinter, 0.45, 1.0, 0.5);
-    run(road, N(80), 'twist', P.twist, 0.5, 1.1, 0.5);
-    run(road, N(70), 'paper', P.paper, 0.6, 1.4, 0.85);
-    run(road, N(55), 'tile', P.tile, 0.5, 1.1, 0.45);
-    run(road, N(45), 'can', P.can, 0.8, 1.2, 0.4);
+    run(road, N(950), 'grit', P.grit, 0.6, 1.8, 0.55);
+    run(road, N(520), 'chunk', P.chunk, 0.4, 1.1, 0.4);
+    run(road, N(420), 'brickHalf', P.brickHalf, 0.65, 1.35, 0.45);
+    run(road, N(320), 'plaster', P.plaster, 0.5, 1.4, 0.5);
+    run(road, N(240), 'slabSmall', P.slabSmall, 0.55, 1.3, 0.55);
+    run(road, N(190), 'splinter', P.splinter, 0.5, 1.2, 0.5);
+    run(road, N(150), 'twist', P.twist, 0.55, 1.3, 0.5);
+    run(road, N(150), 'paper', P.paper, 0.6, 1.6, 0.85);
+    run(road, N(110), 'tile', P.tile, 0.55, 1.25, 0.45);
+    run(road, N(90), 'can', P.can, 0.8, 1.3, 0.4);
+    run(road, N(70), 'pebble', P.pebble, 0.7, 1.5, 0.5);
+    run(road, N(60), 'chunkBig', P.chunkBig, 0.3, 0.6, 0.45);
   }
 
   return { pieces };
