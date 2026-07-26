@@ -128,15 +128,32 @@ export class IndirectLight {
     // the fallback warm-sun colour would tint a moonlit night orange.
     const warm = 0.32 * THREE.MathUtils.clamp(si * 0.5, 0, 1);
 
+    // Azimuthal alignment with the sun. The sky is not a ring of one colour:
+    // the half of the horizon the sun is in is two to three times brighter and
+    // much warmer than the half behind you, and the lower the sun the wider
+    // that gap. Averaging the two — which is what a single horizon colour does
+    // — is exactly what makes a facade turned away from a low sun read as an
+    // unlit cardboard cutout with no bounce on it.
+    const hl = Math.sqrt(this.sunDir.x * this.sunDir.x + this.sunDir.z * this.sunDir.z);
+    let sunward = 0.5;
+    if (hl > 1e-4) {
+      sunward = 0.5 + 0.5 * ((x * this.sunDir.x + z * this.sunDir.z) / hl);
+    }
+    const lowSun = 1 - THREE.MathUtils.smoothstep(this.sunDir.y, 0.06, 0.55);
+
     if (y >= 0) {
       // The horizon band carries most of the fill at low sun, and it is far
       // warmer and brighter than the zenith — approximating it from the zenith
       // colour alone is what crushes golden-hour shadows to black.
       const hz = this._horizonMix;
       const t = THREE.MathUtils.smoothstep(y, 0, 0.45);
-      const hr = THREE.MathUtils.lerp(hz.r, su.r, warm * 0.5) * 1.1;
-      const hg = THREE.MathUtils.lerp(hz.g, su.g, warm * 0.5) * 1.1;
-      const hb = THREE.MathUtils.lerp(hz.b, su.b, warm * 0.5) * 1.1;
+      // Ring gain averages to ~1.15 over azimuth, so this redistributes the
+      // horizon energy far more than it adds any.
+      const gain = 1.1 * THREE.MathUtils.lerp(1, THREE.MathUtils.lerp(0.60, 1.72, sunward), lowSun);
+      const wmix = warm * (0.28 + 1.00 * sunward);
+      const hr = THREE.MathUtils.lerp(hz.r, su.r, wmix) * gain;
+      const hg = THREE.MathUtils.lerp(hz.g, su.g, wmix) * gain;
+      const hb = THREE.MathUtils.lerp(hz.b, su.b, wmix) * gain;
       out.setRGB(
         THREE.MathUtils.lerp(hr, sc.r * 0.85, t),
         THREE.MathUtils.lerp(hg, sc.g * 0.85, t),
@@ -146,17 +163,23 @@ export class IndirectLight {
       const k = 0.55 + 0.45 * (1 + y);
       const lit = si * up * 0.3;
       const g = this.groundAlbedo;
+      // The lit half of the ground bounces back toward the sun's side too, and
+      // that warm upward fill is most of what keeps a shaded facade from going
+      // to a flat silhouette at golden hour.
+      const b = 0.55 + 0.90 * sunward;
       out.setRGB(
-        g.r * (su.r * lit + sc.r * 0.4) * k,
-        g.g * (su.g * lit + sc.g * 0.4) * k,
-        g.b * (su.b * lit + sc.b * 0.4) * k
+        g.r * (su.r * lit * b + sc.r * 0.4) * k,
+        g.g * (su.g * lit * b + sc.g * 0.4) * k,
+        g.b * (su.b * lit * b + sc.b * 0.4) * k
       );
     }
 
     // Circumsolar glow: gives the ambient a direction so flat walls still shade.
+    // Broadened from a pure d^3 lobe — SH9 cannot carry a tight one anyway, and
+    // the wider aureole survives the projection instead of being deringed away.
     const d = x * this.sunDir.x + y * this.sunDir.y + z * this.sunDir.z;
     if (d > 0) {
-      const g = d * d * d * si * 0.09;
+      const g = d * d * (0.045 + 0.055 * d) * si;
       out.r += su.r * g;
       out.g += su.g * g;
       out.b += su.b * g;
@@ -399,11 +422,22 @@ export class IndirectLight {
     }
 
     // Never let an interior fall to pure black; the hemisphere is the floor.
-    const floor = (0.05 + 0.13 * vis) * s;
-    this.hemi.color.copy(this.skyColor);
-    this.hemi.groundColor.copy(this.groundAlbedo).multiply(this.sunColor).multiplyScalar(0.9);
+    // It has to be a *fraction of the sky's own irradiance*, not an absolute
+    // intensity: skyColor is HDR radiance in `sky.exposure` units, so the old
+    // fixed 0.05 was under 2% of the real fill at noon and floored nothing at
+    // all. Anchoring it to the DC term of the projected sky makes it hold at
+    // every time of day, and it opens up as sky visibility closes down, which
+    // is when a probe-only fill would otherwise reach zero.
+    const dc = 0.886227;
+    this.hemi.color.setRGB(_sky[0] * dc, _sky[1] * dc, _sky[2] * dc);
+    this.hemi.groundColor
+      .setRGB(_sky[0] * dc, _sky[1] * dc, _sky[2] * dc)
+      .multiply(this.groundAlbedo)
+      .lerp(_tmp.copy(this.sunColor).multiply(this.groundAlbedo)
+        .multiplyScalar(this.sunIntensity * 0.05 * Math.max(0, this.sunDir.y)), 0.5);
     this.hemi.intensity =
-      floor * (0.35 + 0.65 * Math.min(1, this.sunIntensity * 0.4 + this.artificial * 0.25));
+      (0.10 + 0.20 * (1 - vis)) * s *
+      (0.5 + 0.5 * Math.min(1, this.sunIntensity * 0.4 + this.artificial * 0.25));
   }
 
   dispose() {
