@@ -1,9 +1,9 @@
 # HANDOFF — Claude of Duty
 
-**Paused:** 2026-07-25, after Wave 1 + its integration pass.
+**Paused:** 2026-07-25, after Wave 1, its integration pass, and the resumed visual pass.
 **Repo:** `/Users/jacksmith/Documents/github/jack/claude-of-duty` (git, no remote)
-**Last good commit:** `4c0fd00` — *wave1 integration: radiometric sun/sky agreement,
-GPU tier detection, contract-complete greybox, worldUV*
+**Last good commit:** `062cf70` — *shoot: reframe establishing and goldenhour presets*
+**Current look:** `docs/state-at-pause.png`
 
 ---
 
@@ -11,15 +11,19 @@ GPU tier detection, contract-complete greybox, worldUV*
 
 The engine and the whole rendering pipeline are **built, integrated and working**.
 ~17,700 lines across 82 files. The harness renders 10 fixed camera presets headless
-on a real GPU with **zero console errors at 60 fps** (1600×900, 210 draws).
+on a real GPU with **zero console errors at 60 fps** (1600×900, 178–193 draws).
 
-The frames now show a real street: kerbs, lamp posts, brick and concrete facades,
-cobbled and asphalt ground, an archway, staggered rooflines. `night` and
-`goldenhour` are genuinely good. It is still a **blockout** — no props, clutter,
-decals, weapons, AI or HUD — but it is a contract-complete blockout that exercises
-every integration path.
+The frames show a real street with a blue cloud-scattered sky, a hard sun raking
+across the road so the street floor splits half in light and half in shadow, warm
+cream facades against blue-shadowed ones, and three readable depth planes. `night`
+and `goldenhour` are genuinely good; `goldenhour` is the strongest frame in the set.
 
-Wave 2 (content) has not started. No visual critic loop has run yet.
+It is still a **blockout** — no props, clutter, decals, weapons, AI or HUD — but it
+is a contract-complete blockout that exercises every integration path.
+
+Wave 2 (content) has not started. **No visual critic loop has run yet** — nothing
+has been through a blind A/B against a real Call of Duty frame. That harness is
+built and self-tested but has never been pointed at a finished shot.
 
 ---
 
@@ -32,7 +36,7 @@ node tools/shoot.mjs        # render all 10 presets to shots/ + shots/report.jso
 node tools/contact.mjs --dir shots --out shots/_sheet.png --cols 3   # review them at a glance
 ```
 
-If anything is broken on resume: `git reset --hard 4c0fd00` is a known-good state.
+If anything is broken on resume: `git reset --hard 062cf70` is a known-good state.
 
 ---
 
@@ -439,3 +443,33 @@ opinion:
 - a **sun-bearing calculator** — reimplements `horizonDir()` so a candidate
   `NORTH_OFFSET` can be checked against every time-of-day anchor before
   rendering anything.
+
+---
+
+## Preset reframing (final change before the pause)
+
+`establishing` and `goldenhour` had been framing into a brick wall. Both preset
+cameras were authored against the scaffold's scattered-box placeholder and were
+never re-aimed when the street layout replaced it — `establishing` sat behind the
+east block row, and after a first correction landed on a rooftop instead.
+
+- `establishing` → `[4, 17, 33]` looking at `[-1, 1.5, -20]`, fov 60. Elevated,
+  over the street rather than beside it, so the whole three-lane layout, both
+  facade rows, the shadow split and the sky all read in one frame.
+- `goldenhour` → dropped to ground level at `[4.5, 1.75, 18]`, fov 65. It had been
+  sharing the establishing camera; the point of the shot is shadows raking the
+  length of the street, which only reads from down in it.
+
+Both verified at 60 fps, `errors: []`.
+
+**What this exposed, and what to fix first on resume:** at the new establishing
+altitude the ground plane ends in a visible dark band at the horizon, and the
+rooftops are completely empty. Neither was visible from the old camera. The
+rooftops are a Wave 2 props job (ART_DIRECTION calls for AC units, walkways,
+cables); the horizon band needs either a larger ground extent or a distant
+silhouette layer.
+
+**Preset hygiene rule going forward:** every time the level geometry changes
+materially, re-verify all 10 presets still frame something worth judging. Three
+separate agents have now each independently reviewed a shot that was pointed at a
+wall and reported on the wall.
