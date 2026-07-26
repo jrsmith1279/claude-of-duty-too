@@ -53,6 +53,14 @@ async function main() {
   const salt = arg('salt', '');
   const layout = arg('layout', 'side'); // side | stack
   const panelW = parseInt(arg('panelw', '1100'), 10);
+  // Both panels are resampled to the same width and then round-tripped through
+  // JPEG at the same quality before compositing. Without this the blind test
+  // leaks: the references are JPEG press images and our frames are PNG, so the
+  // reference panel carries ringing and 8x8 blocking that our panel does not,
+  // and a critic that notices compression artefacts has identified the panels
+  // without judging a single pixel of render quality. Matching the codec on
+  // both sides removes the tell. --jpegq 0 disables the round-trip.
+  const jpegQ = parseFloat(arg('jpegq', '0.92'));
 
   for (const [name, p] of [['a', aPath], ['b', bPath]]) {
     if (!p || !existsSync(p)) {
@@ -87,7 +95,7 @@ async function main() {
   const page = await browser.newPage({ viewport: { width: 100, height: 100 } });
 
   const size = await page.evaluate(
-    async ({ leftUrl, rightUrl, label, layout, panelW, leftCrop, rightCrop }) => {
+    async ({ leftUrl, rightUrl, label, layout, panelW, leftCrop, rightCrop, jpegQ }) => {
       const load = (src) =>
         new Promise((res, rej) => {
           const im = new Image();
@@ -111,10 +119,36 @@ async function main() {
         c.getContext('2d').drawImage(img, x, y, w, h, 0, 0, w, h);
         return c;
       };
-      const L = applyCrop(Lsrc, leftCrop);
-      const R = applyCrop(Rsrc, rightCrop);
+      // Resample to the final panel width and round-trip through JPEG, both
+      // panels identically. Doing the resample here rather than at draw time
+      // matters too: our frames and the references are authored at different
+      // resolutions, so letting drawImage scale them by different ratios left
+      // one panel visibly crisper than the other for reasons that had nothing
+      // to do with render quality.
+      const normalise = async (img, q) => {
+        const w = panelW;
+        const h = Math.max(1, Math.round((img.height / img.width) * panelW));
+        const c = document.createElement('canvas');
+        c.width = w;
+        c.height = h;
+        const cg = c.getContext('2d');
+        cg.imageSmoothingEnabled = true;
+        cg.imageSmoothingQuality = 'high';
+        cg.drawImage(img, 0, 0, w, h);
+        if (!(q > 0)) return c;
+        return await new Promise((res, rej) => {
+          const im = new Image();
+          im.onload = () => res(im);
+          im.onerror = rej;
+          im.src = c.toDataURL('image/jpeg', q);
+        });
+      };
 
-      // Normalise both panels to the same displayed width, preserving aspect.
+      const [L, R] = await Promise.all([
+        normalise(applyCrop(Lsrc, leftCrop), jpegQ),
+        normalise(applyCrop(Rsrc, rightCrop), jpegQ),
+      ]);
+
       const lh = Math.round((L.height / L.width) * panelW);
       const rh = Math.round((R.height / R.width) * panelW);
       const pad = 18;
@@ -168,7 +202,7 @@ async function main() {
       document.body.appendChild(c);
       return { W, H };
     },
-    { leftUrl, rightUrl, label, layout, panelW, leftCrop, rightCrop }
+    { leftUrl, rightUrl, label, layout, panelW, leftCrop, rightCrop, jpegQ }
   );
 
   await page.setViewportSize({ width: size.W, height: size.H });
@@ -187,6 +221,8 @@ async function main() {
     b: path.relative(ROOT, bPath),
     aCrop,
     bCrop,
+    panelW,
+    jpegQ,
   };
   await writeFile(`${outBase}.key.json`, JSON.stringify(key, null, 2));
 
