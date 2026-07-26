@@ -359,6 +359,14 @@ function fragmentSurface(f) {
 
 function fragmentRoughness(f) {
   let s = '\tfloat roughnessFactor = roughness * codRoughTex;\n';
+  // Distance roughness floor. By 200 m the roughness map has mipped to its own
+  // mean and the normal map to a flat average, so the GGX lobe that the micro
+  // geometry should have shattered becomes a coherent mirror of the sky dome —
+  // that is the wet-looking sheen on the far ground plate. A real fix is
+  // Toksvig/LEAN; this is the one-line stand-in that costs a length() the
+  // fragment already has. 0.32 at 0 m (inert under ~12 m for any real surface),
+  // 0.50 at 30 m, 0.92 at 100 m, capped so nothing goes fully Lambertian.
+  s += '\troughnessFactor = max( roughnessFactor, min( 0.94, 0.32 + codViewDist * 0.0060 ) );\n';
   s += `\troughnessFactor = clamp( roughnessFactor + ( codMacro - 0.5 ) * codSurface.w * 1.2, 0.035, 1.0 );
 	roughnessFactor = mix( roughnessFactor, 0.97, codGrime * 0.5 );
 	roughnessFactor = mix( roughnessFactor, roughnessFactor * 0.42 + 0.05, codWetAmt * 0.9 );
@@ -441,6 +449,11 @@ function fragmentAO(f) {
 	#endif
 	#if defined( USE_ENVMAP ) && defined( STANDARD )
 		reflectedLight.indirectSpecular *= computeSpecularOcclusion( saturate( dot( geometryNormal, geometryViewDir ) ), codAO, material.roughness );
+		// Distance IBL rolloff. Even with the roughness floor, a mip-flattened
+		// surface at 200 m still returns a clean sky-dome reflection that reads
+		// as wet tarmac. Real aerial perspective would have eaten most of that
+		// specular energy before it reached the camera; take 65% of it away.
+		reflectedLight.indirectSpecular *= mix( 1.0, 0.35, codFar );
 	#endif
 `;
   return s;
@@ -452,7 +465,7 @@ function fragmentAO(f) {
 const SPECULAR_AA = /* glsl */ `
 	vec3 codNdxy = max( abs( dFdx( normal ) ), abs( dFdy( normal ) ) );
 	float codNvar = max( max( codNdxy.x, codNdxy.y ), codNdxy.z );
-	material.roughness = clamp( material.roughness + codRoughLod + codNvar * 0.55 + codFar * 0.05, 0.0525, 1.0 );
+	material.roughness = clamp( material.roughness + codRoughLod + codNvar * 0.55 + codFar * 0.22, 0.0525, 1.0 );
 `;
 
 const TRANSLUCENCY = /* glsl */ `

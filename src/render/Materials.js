@@ -393,11 +393,30 @@ function applyProps(mat, props) {
 
 function stableKey(overrides, names) {
   let s = '';
-  for (const k of names.slice().sort()) {
-    const v = overrides[k];
-    s += k + ':' + (v && v.isColor ? v.getHexString() : v && v.toArray ? v.toArray().join(',') : v) + ';';
-  }
+  for (const k of names.slice().sort()) s += k + ':' + serialiseOverride(overrides[k], 0) + ';';
   return s;
+}
+
+/**
+ * Identity of one override value for the variant cache.
+ *
+ * `String(texture)` is '[object Object]' for every texture in existence, so the
+ * old version collapsed two variants that differed only in which atlas or
+ * lightmap they were handed — the second caller silently got the first's
+ * material. Textures are identified by uuid, colours by hex (two Color objects
+ * holding the same colour must share a variant), vectors by components, and
+ * anything else object-shaped is walked one level rather than stringified.
+ */
+function serialiseOverride(v, depth) {
+  if (v === null || v === undefined || typeof v !== 'object') return String(v);
+  if (v.isTexture) return 'tex@' + v.uuid;
+  if (v.isColor) return '#' + v.getHexString();
+  if (typeof v.toArray === 'function') return v.toArray().join(',');
+  if (depth >= 2) return v.uuid || '[object]';
+  if (Array.isArray(v)) return '[' + v.map((e) => serialiseOverride(e, depth + 1)).join(',') + ']';
+  let s = '{';
+  for (const k of Object.keys(v).sort()) s += k + ':' + serialiseOverride(v[k], depth + 1) + ',';
+  return s + '}';
 }
 
 /** `ctx.textures.worldSize(key)` is optional; treat anything odd as unknown. */
