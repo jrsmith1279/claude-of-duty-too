@@ -1,24 +1,25 @@
 # HANDOFF — Claude of Duty
 
-**Paused:** 2026-07-25, after Wave 1 (rendering + simulation foundation).
+**Paused:** 2026-07-25, after Wave 1 + its integration pass.
 **Repo:** `/Users/jacksmith/Documents/github/jack/claude-of-duty` (git, no remote)
-**Last good commit:** `93cc934` — *wave1: procedural PBR textures, material shaders,
-atmosphere, CSM lighting, BVH physics, player movement, postfx stack*
+**Last good commit:** `4c0fd00` — *wave1 integration: radiometric sun/sky agreement,
+GPU tier detection, contract-complete greybox, worldUV*
 
 ---
 
 ## 30-second summary
 
-The engine and the whole rendering pipeline are **built and working**. ~17,400 lines
-across 80 files. The harness renders 10 fixed camera presets headless on a real GPU
-with **zero console errors at 42 fps**.
+The engine and the whole rendering pipeline are **built, integrated and working**.
+~17,700 lines across 82 files. The harness renders 10 fixed camera presets headless
+on a real GPU with **zero console errors at 60 fps** (1600×900, 210 draws).
 
-What is missing is **content, exposure and grade** — the game currently renders a
-placeholder greybox beautifully. Wave 2 (level art, props, weapons, FX, AI, audio,
-HUD) has not started. No visual critic loop has run yet.
+The frames now show a real street: kerbs, lamp posts, brick and concrete facades,
+cobbled and asphalt ground, an archway, staggered rooflines. `night` and
+`goldenhour` are genuinely good. It is still a **blockout** — no props, clutter,
+decals, weapons, AI or HUD — but it is a contract-complete blockout that exercises
+every integration path.
 
-Do not judge the project by the current screenshots: the level is still the 27-line
-placeholder from the scaffold. The renderer under it is real.
+Wave 2 (content) has not started. No visual critic loop has run yet.
 
 ---
 
@@ -31,7 +32,50 @@ node tools/shoot.mjs        # render all 10 presets to shots/ + shots/report.jso
 node tools/contact.mjs --dir shots --out shots/_sheet.png --cols 3   # review them at a glance
 ```
 
-If anything is broken on resume: `git reset --hard 93cc934` is a known-good state.
+If anything is broken on resume: `git reset --hard 4c0fd00` is a known-good state.
+
+---
+
+## What the integration pass did (recovered work)
+
+The Wave 1 integration agent **died mid-run on an expired login**. It had already
+written its changes to disk but never committed or reported. I verified the build,
+re-rendered all 10 presets, reviewed them, and committed its work as `4c0fd00`.
+Nothing was lost, but **it never finished its checklist** — see "not done" below.
+
+What it fixed, and why each mattered:
+
+- **`src/render/Lighting.js` — the real cause of the blown exposure.** The sun's
+  intensity was a hardcoded `SUN_PEAK = 3.7` while the sky dome, PMREM probe and
+  aerial-perspective inscatter were all authored in `ctx.sky.exposure` units. The
+  two were **2.9 stops apart** (sun delivering 2.84 against a dome assuming 21.1),
+  so auto-exposure keyed to the ground and clipped the sky to flat white. Now the
+  key light is derived from `sky.sunIntensity × sky.exposure`, so the elevation
+  ramp comes from real airmass and the two systems agree by construction.
+- **`src/core/Engine.js` — GPU tier detection.** `deviceMemory`/`hardwareConcurrency`
+  alone put every modern laptop on `ultra`, which is a discrete-GPU preset (2048²
+  textures, 8-step GTAO, 32-step volumetrics, 24-step POM) — measured at 26 ms/frame
+  on the M2 against a 16.6 ms budget. Integrated parts now cap at `high`.
+  **This is the 42 → 60 fps win.**
+- **`src/world/Level.js` (+323 lines) — contract-complete blockout.** Publishes
+  every field `ARCHITECTURE.md` promises (`bounds`, `spawns`, `lightSpecs`,
+  `coverPoints`, `navPolys`) and registers its own colliders. Before this, three
+  integration paths were dead code that had never executed against real data. Also
+  adds `worldUV()`, which rewrites box UVs to metres so geometry meets the
+  1-unit-per-metre convention — this let it drop the triplanar path, which was
+  costing **14 ms of a 21 ms budget** in three texture fetches per map per pixel.
+- **`src/main.js`** — `window.__COD__` was being *replaced* after `engine.init()`,
+  silently dropping every hook systems attached during their own init. Several Wave 1
+  agents had each independently grown a re-attach-on-update workaround for it.
+- **`src/render/Sky.js`** — stop double-drawing the dome as `scene.background`; it
+  was a full-screen pass immediately overdrawn by the camera-locked dome.
+- **`tools/shoot.mjs`** — `goldenhour` was `tod: 0.09`, which under the contract's
+  anchors is **02:10, full night**. It had been rendering as moonlit pre-dawn while
+  being reviewed as a golden-hour shot. Now `0.76`.
+
+**What it did NOT get to** (it died before these): reading each PNG and fixing cheap
+visual wins, and its own final report. So no one has yet done a careful per-shot
+review with fixes — that is the first task on resume.
 
 ---
 
@@ -77,36 +121,38 @@ The harness runs on **ANGLE Metal / Apple M2**, not SwiftShader — verified via
 
 ## What is wrong right now — ranked, with the likely fix
 
-Assessed from `shots/integrated/` (contact sheet at `shots/_wave1_sheet.png`).
+Assessed from `shots/postint/` (contact sheet at `shots/_postint_sheet.png`),
+rendered and reviewed after the integration commit.
 
-1. **Exposure is blown out.** Sky and everything past ~30 m is clipped pure white in
-   7 of 10 shots. This single defect makes the frames look worse than the geometry
-   deserves. → `src/render/passes/ExposurePass.js`. Either auto-exposure is metering
-   off a dark foreground and over-compensating, or the fixed EV is several stops hot.
-   Check `renderer.toneMappingExposure` in `Renderer.js` isn't double-applying on top
-   of the pass.
-2. **The grade is monochrome blue-grey.** `docs/ART_DIRECTION.md` calls for a
-   warm-key / cool-fill split; there is no warm anywhere. → `passes/GradePass.js` +
-   `passes/LUT.js`; confirm `ctx.sky.sunColor` actually reaches the sun light and that
-   the active LUT isn't stuck on `neutral`.
-3. **Fog is pure white and far too dense.** It erases depth instead of layering it.
-   Aerial perspective should tint toward the sky colour in the view direction and
-   should still leave the far plane readable. → `src/render/sky/AerialPerspective.js`.
-4. **Golden hour renders as night** — stars visible at TOD 0.09. The preset TOD values
-   in `tools/shoot.mjs` were authored before the real ephemeris existed and no longer
-   map to the intended sun elevations. → retune `SHOTS[*].tod` against `sky/Ephemeris.js`.
-5. **The `interior` preset camera is inside a wall**, and `weapon`/`ads`/`combat`
-   presets show no weapon and no bots. Both are expected — those systems are Wave 2 —
-   but the preset coordinates were authored for the ASHFALL layout that does not
-   exist yet, and must be re-aimed once the level lands.
-6. **42 fps at 1080p**, against a 60 target. Not yet profiled. 94 draw calls and 832
-   triangles means it is entirely fill/post cost, not geometry — start by timing the
-   post passes individually.
-7. **Still greybox.** No architecture, props, clutter, decals or vegetation. This is
-   Wave 2 and is the single largest remaining chunk of work.
+**Fixed since the last handoff:** blown exposure (root cause was the sun/sky stop
+mismatch, not the exposure pass), golden hour rendering as night, and the 42 fps.
 
-Genuinely good already: close-up material response, the night shot's moon/star/blue
-grade, shadow softness, and the sense of atmospheric distance (once the fog is fixed).
+1. **Still clipping to white toward the sun.** `ads`, `materials`, `street`, `weapon`
+   and `skyline` all blow out to flat white down the street axis. Much improved, but
+   the sun sits almost exactly along the street heading, so every ground-level preset
+   shoots straight into it. Two things to try, in order: **re-aim the sun azimuth** so
+   it rakes *across* the street rather than down it (this is what `ART_DIRECTION.md`
+   asks for — the half-sun/half-shadow split is the whole shot), and check the
+   auto-exposure metering weights in `passes/ExposurePass.js` aren't centre-weighted
+   onto the bright end of the corridor.
+2. **The grade is still largely neutral.** There is warmth in `goldenhour` now, but
+   the noon presets have no warm-key/cool-fill separation. → `passes/GradePass.js` +
+   `passes/LUT.js`; confirm the active look isn't stuck on `neutral`.
+3. **Aerial perspective reads as white haze, not coloured depth.** It should tint
+   toward the sky colour in the view direction and leave the far plane readable.
+   → `src/render/sky/AerialPerspective.js`. Partly downstream of #1.
+4. **`goldenhour` has a flat, unlit left block** — the facade facing camera-left gets
+   almost no light and no bounce, so it reads as a cardboard cutout. Likely the
+   indirect/irradiance term not picking up the low sun. → `render/lighting/Indirect.js`.
+5. **`weapon`/`ads`/`combat` presets show no weapon and no bots.** Expected — Wave 2 —
+   but the presets need re-aiming once weapons and AI exist.
+6. **Still a blockout.** No props, clutter, decals, vegetation or interiors. Every
+   surface is clean and undamaged, violating most of the `ART_DIRECTION.md` density
+   rules. This is Wave 2 and is the single largest remaining chunk of work.
+
+Genuinely good already: material response at close range (brick and concrete both
+hold up), the `night` shot end to end, `interior`'s archway framing, shadow softness,
+cobblestone and asphalt ground surfaces, and the lamp-post fixtures.
 
 ---
 
@@ -129,7 +175,10 @@ agents, zero merge conflicts, one integration pass):
 
 Before firing Wave 2, **fix defects 1–4 above first**. They are cheap, they are in
 Wave 1 files nobody else will touch, and every screenshot Wave 2 produces will be
-misleading until exposure and grade are right.
+misleading until the sun azimuth and grade are right. Defect #1 in particular is
+mostly a *sun direction* decision, and it should be made deliberately as art
+direction rather than discovered later — it determines the composition of every
+ground-level shot in the game.
 
 ### Wave 3 — the blind critic loop (not started)
 Per camera preset, loop until pass:
@@ -158,10 +207,15 @@ tell which panel is ours.
 - **Honest expectation:** individual environment frames reaching coin-flip confidence
   is achievable. Matching the full game — animation, audio, content volume, mocap —
   is thousands of person-years and will not happen. Judge this on the frames.
-- **A Wave 1 integration agent was still running when we paused.** It had already
-  produced all 10 screenshots cleanly; it was in its "read each PNG and fix cheap
-  wins" stage. If the working tree has uncommitted changes on resume, that is its
-  work — `git diff` it, keep what is good.
+- **Long-running agents can die on auth expiry and lose their report.** That is what
+  happened to the Wave 1 integrator — its file edits survived on disk but its summary
+  and its remaining checklist did not. When fanning out Wave 2, have each agent commit
+  its own work as it goes rather than only at the end, so a mid-run death costs the
+  report and not the work.
+- **The parallel-agent pattern works well.** 7 agents, 17k lines, zero merge
+  conflicts, one integration pass. The thing that made it work is `ARCHITECTURE.md`:
+  disjoint file ownership, a written `ctx` API contract, and every agent told to
+  verify with `vite build` + the screenshot harness before reporting. Keep all three.
 - **`refs/`, `shots/`, `blind/`, `dist/`, `node_modules/` are gitignored.** The
   reference screenshots are official Activision press images used locally and
   transiently for critique; they are never redistributed or shipped with the build.
