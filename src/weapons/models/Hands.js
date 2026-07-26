@@ -90,15 +90,15 @@ function buildTriggerHand(p) {
   // made the first pass read as a cluster of sausages behind the weapon.
   for (let i = 0; i < 3; i++) {
     const y = -0.0060 - i * 0.0170;
-    p.add('glove', finger([0.0125, y, -0.0140], -0.22, -0.10, -0.97, 2.5, 0, 1, 0, 0.046 - i * 0.004, 0.0076 - i * 0.0005), {});
-    // Knuckle over the top of each finger root.
-    p.add('glove', sphere(0.0080 - i * 0.0005, 8), { x: 0.0135, y: y + 0.0035, z: -0.0130 });
+    p.add('glove', finger([0.0060, y, -0.0150], -0.20, -0.14, -0.97, 2.55, 0, 1, 0, 0.036 - i * 0.003, 0.0076 - i * 0.0005), {});
+    // Knuckle over the root of each finger.
+    p.add('glove', sphere(0.0079 - i * 0.0005, 8), { x: 0.0105, y: y + 0.0032, z: -0.0128 });
   }
   // Index finger, straighter, reaching the trigger.
-  p.add('glove', finger([0.0125, 0.0175, -0.0130], -0.20, -0.09, -0.98, 1.20, 0, 1, 0, 0.050, 0.0080), {});
-  p.add('glove', sphere(0.0084, 8), { x: 0.0135, y: 0.0210, z: -0.0120 });
+  p.add('glove', finger([0.0060, 0.0175, -0.0145], -0.18, -0.10, -0.98, 1.10, 0, 1, 0, 0.040, 0.0080), {});
+  p.add('glove', sphere(0.0083, 8), { x: 0.0105, y: 0.0208, z: -0.0120 });
   // Thumb laid across the back of the grip and down.
-  p.add('glove', finger([0.0170, 0.0150, 0.0165], -0.50, -0.60, -0.62, 0.55, 0.3, -0.4, 0.7, 0.044, 0.0090), {});
+  p.add('glove', finger([0.0140, 0.0145, 0.0150], -0.44, -0.62, -0.65, 0.50, 0.3, -0.4, 0.7, 0.038, 0.0090), {});
 
   // Cuff. Short on purpose: the forearm is out of frame, and a long tapered
   // tube hanging into shot is worse than no forearm at all.
@@ -121,7 +121,7 @@ function buildSupportHand(p, radius) {
   // Four fingers reaching up over the top of the handguard.
   for (let i = 0; i < 4; i++) {
     const z = -0.0250 + i * 0.0168;
-    p.add('glove', finger([-(R + 0.0055), -0.0180 + i * 0.0008, z], 0.42, 0.90, 0.0, 2.6, 0, 0, -1, 0.044 - i * 0.003, 0.0074 - i * 0.0005), {});
+    p.add('glove', finger([-(R + 0.0045), -0.0165 + i * 0.0008, z], 0.40, 0.92, 0.0, 2.55, 0, 0, -1, 0.037 - i * 0.0025, 0.0074 - i * 0.0005), {});
   }
   // Thumb laid forward along the top-left rail — the modern C-clamp grip.
   p.add('glove', finger([-(R + 0.0045), 0.0105, 0.0165], 0.26, 0.20, -0.94, 0.30, 1, 0, 0, 0.050, 0.0088), {});
