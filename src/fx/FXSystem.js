@@ -715,6 +715,12 @@ export class FXSystem {
 
     // `stageCombat` is shared with the AI agent (bots) — chain rather than
     // clobber, whichever order the two systems install in.
+    //
+    // `__fx` is *propagated* by every well-behaved wrapper (see AISystem), not
+    // just set by this one. Without that, the re-install on `engine:ready` saw
+    // the AI's wrapper on the head of the chain, decided FX was not installed,
+    // and wrapped the whole thing again; the AI's lateUpdate then re-wrapped
+    // that, and one `stageCombat()` call ran the bot staging twice.
     const install = () => {
       const prev = api.stageCombat;
       if (prev && prev.__fx) return;

@@ -461,18 +461,14 @@ export class AISystem {
    * Merge into `window.__COD__` rather than replacing it, and compose with any
    * `stageCombat` the fx system installed — the harness calls one hook and
    * both systems need to hear about it.
+   *
+   * A wrapper must carry the ownership marks of everything below it in the
+   * chain, or the other system's "am I installed?" test fails and it wraps a
+   * second time. `_wrapStage` is the single place that gets that right.
    */
   _installHooks() {
     const api = (window.__COD__ = window.__COD__ || {});
-    const prev = api.stageCombat;
-    const mine = (...args) => {
-      let r;
-      try { r = prev?.(...args); } catch (e) { /* fx staging is optional */ }
-      this.stageForScreenshot(typeof args[0] === 'object' ? args[0] : undefined);
-      return r;
-    };
-    api.stageCombat = mine;
-    this._stageHook = mine;
+    this._wrapStage(api);
     api.ai = {
       spawn: (team, x, y, z) => this.spawn(team, _v0.set(x, y, z)),
       squad: (n, team) => this.spawnSquad(n, team),
@@ -483,18 +479,29 @@ export class AISystem {
     };
   }
 
+  /** Wrap whatever `stageCombat` is currently installed, preserving its marks. */
+  _wrapStage(api) {
+    const prev = api.stageCombat;
+    const mine = (...args) => {
+      let r;
+      try { r = prev?.(...args); } catch (e) { /* fx staging is optional */ }
+      this.stageForScreenshot(typeof args[0] === 'object' ? args[0] : undefined);
+      return r;
+    };
+    mine.__ai = true;
+    mine.__fx = !!prev?.__fx;   // so FX's re-install on engine:ready is a no-op
+    api.stageCombat = mine;
+    this._stageHook = mine;
+  }
+
   lateUpdate() {
     // Another system may have installed its own stageCombat after us; re-wrap
-    // so both still run.
+    // so both still run. `__ai` covers the case where someone else wrapped
+    // *our* hook and correctly propagated the mark — that chain already calls
+    // us, and re-wrapping it would stage the bots twice.
     const api = window.__COD__;
-    if (api && api.stageCombat !== this._stageHook) {
-      const prev = api.stageCombat;
-      const mine = (...args) => {
-        try { prev?.(...args); } catch (e) { /* optional */ }
-        this.stageForScreenshot(typeof args[0] === 'object' ? args[0] : undefined);
-      };
-      api.stageCombat = mine;
-      this._stageHook = mine;
+    if (api && api.stageCombat !== this._stageHook && !api.stageCombat?.__ai) {
+      this._wrapStage(api);
     }
   }
 
