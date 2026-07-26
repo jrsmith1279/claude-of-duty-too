@@ -158,19 +158,37 @@ export class NavMesh {
 
             const half = (perp0 + perp1) * 0.25; // half the gap, signed
             const y = Math.max(pa.y, pb.y);
-            const mx = ax0 + aux * (lo + hi) * 0.5 + -auz * half;
-            const mz = az0 + auz * (lo + hi) * 0.5 + aux * half;
+            let s0 = lo, s1 = hi;
+
             if (Math.abs(half) > 0.06 && losFn) {
-              // A real gap: only a genuinely open one is a portal. Probe both
-              // the mid-point and a shoulder either side of it so a doorway
-              // narrower than the overlap is caught.
-              const px = -auz * Math.abs(half) * 2.4, pz = aux * Math.abs(half) * 2.4;
-              if (!losFn(mx - px, mz - pz, mx + px, mz + pz, y)) continue;
+              // A real gap between two polygons is only a portal where it is
+              // actually open. Sample across the overlap and keep the longest
+              // clear run — that finds the doorway in a wall instead of
+              // declaring the whole wall walkable because its midpoint
+              // happened to be a door.
+              const span = hi - lo;
+              const steps = Math.max(2, Math.min(24, Math.round(span / 0.3)));
+              const px = -auz * Math.abs(half) * 2.6, pz = aux * Math.abs(half) * 2.6;
+              let runStart = -1, bestA = 0, bestB = -1;
+              for (let q = 0; q <= steps; q++) {
+                const t = lo + (span * q) / steps;
+                const sx = ax0 + aux * t - auz * half;
+                const sz = az0 + auz * t + aux * half;
+                const clear = losFn(sx - px, sz - pz, sx + px, sz + pz, y);
+                if (clear && runStart < 0) runStart = t;
+                if ((!clear || q === steps) && runStart >= 0) {
+                  const end = clear ? t : lo + (span * (q - 0.5)) / steps;
+                  if (end - runStart > bestB - bestA) { bestA = runStart; bestB = end; }
+                  runStart = -1;
+                }
+              }
+              if (bestB - bestA < MIN_OVERLAP) continue;
+              s0 = bestA; s1 = bestB;
             }
-            // Portal endpoints, shrunk a little so an agent hugging the edge
-            // does not clip the jamb.
-            const inset = Math.min(0.28, (hi - lo) * 0.25);
-            const s0 = lo + inset, s1 = hi - inset;
+
+            // Shrink a little so an agent hugging the edge misses the jamb.
+            const inset = Math.min(0.3, (s1 - s0) * 0.28);
+            s0 += inset; s1 -= inset;
             this._addPortal(pa, pb,
               ax0 + aux * s0 - auz * half, az0 + auz * s0 + aux * half,
               ax0 + aux * s1 - auz * half, az0 + auz * s1 + aux * half);
