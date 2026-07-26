@@ -1,576 +1,309 @@
 # HANDOFF — Claude of Duty
 
-**Paused:** 2026-07-25 (late). Wave 2 content landed; Wave 2 integration was
-interrupted partway and the blind critic run never started.
+**Paused:** 2026-07-26. Wave 3 (facades / horizon / bots / clutter / road / dressing)
+landed in full. Budgets are blown and the blind critic has still never run.
 **Repo:** `/Users/jacksmith/Documents/github/jack/claude-of-duty` (git, no remote)
-**Last good commit:** see `git log -1` — tree is clean, build passes, harness runs clean.
-**Current look:** `docs/state-at-pause.png` (goldenhour) and
-`docs/state-at-pause-sheet.png` (all 10 presets).
+**Tree:** clean, `npx vite build` passes, all 10 presets render with `errors: []`.
+**Last good commit:** `git log -1`. Wave 3 is the 40 commits after `b394676`.
 
-> **READ THIS FIRST, THEN `## WHERE TO PICK UP` AT THE BOTTOM.**
-> Everything between is history and reference.
-
----
-
-## 30-second summary
-
-**128 files, ~36,900 lines, 67 commits.** The game now renders a dense, populated
-combat street: weapon viewmodels with working red-dot optics, ground clutter and
-debris, market stalls, burnt-out vehicles, oil drums, overhead power cables and
-laundry lines, graffiti and decals, AI bots, and a staged combat tableau with
-tracers and muzzle flash.
-
-Harness: **zero console errors, all 10 presets render.**
-
-**But it is now over budget on both axes** — 358 draw calls against a 350 limit,
-and 36–49 fps against a 60 target. That is the top priority on resume, and it is
-the direct cause of the interruption happening before the critic run.
-
-Wave 2 integration got roughly 80% through. **The blind A/B critic against real
-Call of Duty frames has still never run** — that harness is built and self-tested
-but has never judged a finished shot.
+> **READ `## WHERE TO PICK UP` AT THE BOTTOM FIRST.** Everything above it is
+> evidence for why the plan is what it is.
 
 ---
 
-## Resume in three commands
+## The one thing to know before touching performance
 
-```bash
-cd /Users/jacksmith/Documents/github/jack/claude-of-duty
-npm run dev                 # play it: http://localhost:5173  (click to lock pointer)
-node tools/shoot.mjs        # render all 10 presets to shots/ + shots/report.json
-node tools/contact.mjs --dir shots --out shots/_sheet.png --cols 3   # review them at a glance
+The previous handoff's resume plan said: performance first, and get there by
+cutting draw calls — `setDensity`, instancing, LODs, distance culling. **That plan
+was wrong and following it would have cost visual quality for almost no frame
+rate.** It was disproved by measurement, not opinion. `tools/profile.mjs` now
+exists to keep it disproved.
+
+Measured on the M2 (ads preset, draw calls held constant at 332, render buffer
+scaled over 0.73 / 1.44 / 2.86 Mpx):
+
+```
+frameMs = 8.80 + 12.92 * megapixels
 ```
 
-If anything is broken on resume: `git reset --hard 062cf70` is a known-good state.
+Everything the CPU does — draw submission, culling, geometry, animation, physics,
+**and shadow-map rendering** — is the 8.80 ms constant. Everything else is
+per-pixel. Consequences:
+
+- **Driving draw calls to literally zero would still leave ~54 fps.** Draw count is
+  not what is costing the frame rate. It is worth keeping under budget for its own
+  sake, but it is not the lever.
+- The whole post chain costs **6.2 ms**. Deleting every bit of it — TAA, GTAO,
+  volumetrics, bloom, DOF — buys 47.9 fps. Still not 60.
+- Shadow **map rendering** costs ~1 ms. Shadow **sampling** — PCSS filtering in the
+  fragment shader of every lit surface — costs **~5 ms**. This is why lowering
+  cascade count (0.65 ms) and shadow map size (0.70-0.95 ms) has never moved the
+  number: both only touch the ~1 ms half.
+- Hiding `Level` saves 27.7 ms because the walls fill the frame and every wall
+  pixel runs the full `SurfaceShader` (POM + triplanar + detail normals + macro
+  variation + wetness). `AI`, `FX` and `Vegetation` together are under 1 ms —
+  cutting bots or effects buys nothing.
+
+**Measurement caveat, and it bounds what the per-pass table can support:**
+`EXT_disjoint_timer_query_webgl2` is not available in this environment (the probe
+reports `gpuTimer:false`), so every figure is derived from an fps counter that
+quantises to roughly 1 fps. Individual post passes separated by ~1.4 ms are AT
+that resolution limit and must not be ranked against each other. The large deltas
+— 6.2 ms whole chain, 5.98 vs 0.95 ms sample-vs-render — are many times the
+quantisation and are safe to act on.
+
+Raw measurement JSON is in `profile/` (gitignored). Re-run with
+`node tools/profile.mjs`.
 
 ---
 
-## What the integration pass did (recovered work)
+## Measured state
 
-The Wave 1 integration agent **died mid-run on an expired login**. It had already
-written its changes to disk but never committed or reported. I verified the build,
-re-rendered all 10 presets, reviewed them, and committed its work as `4c0fd00`.
-Nothing was lost, but **it never finished its checklist** — see "not done" below.
+Wave 3, 1920x1080, ANGLE Metal / Apple M2, `errors: []`, all 10 presets render:
 
-What it fixed, and why each mattered:
+| preset | fps | draws | tris | programs |
+|---|---|---|---|---|
+| establishing | 25 | 326 | 1.85 M | 53 |
+| street | 22 | 342 | 1.87 M | 53 |
+| interior | 28 | 318 | 1.86 M | 53 |
+| weapon | 24 | 369 | 1.90 M | 53 |
+| ads | 22 | 356 | 1.90 M | 56 |
+| materials | 27 | 303 | 1.87 M | 56 |
+| goldenhour | 23 | 333 | 1.87 M | 56 |
+| night | 21 | 352 | 1.87 M | 56 |
+| skyline | 25 | 336 | 1.87 M | 56 |
+| **combat** | **23** | **372** | **1.94 M** | **63** |
 
-- **`src/render/Lighting.js` — the real cause of the blown exposure.** The sun's
-  intensity was a hardcoded `SUN_PEAK = 3.7` while the sky dome, PMREM probe and
-  aerial-perspective inscatter were all authored in `ctx.sky.exposure` units. The
-  two were **2.9 stops apart** (sun delivering 2.84 against a dome assuming 21.1),
-  so auto-exposure keyed to the ground and clipped the sky to flat white. Now the
-  key light is derived from `sky.sunIntensity × sky.exposure`, so the elevation
-  ramp comes from real airmass and the two systems agree by construction.
-- **`src/core/Engine.js` — GPU tier detection.** `deviceMemory`/`hardwareConcurrency`
-  alone put every modern laptop on `ultra`, which is a discrete-GPU preset (2048²
-  textures, 8-step GTAO, 32-step volumetrics, 24-step POM) — measured at 26 ms/frame
-  on the M2 against a 16.6 ms budget. Integrated parts now cap at `high`.
-  **This is the 42 → 60 fps win.**
-- **`src/world/Level.js` (+323 lines) — contract-complete blockout.** Publishes
-  every field `ARCHITECTURE.md` promises (`bounds`, `spawns`, `lightSpecs`,
-  `coverPoints`, `navPolys`) and registers its own colliders. Before this, three
-  integration paths were dead code that had never executed against real data. Also
-  adds `worldUV()`, which rewrites box UVs to metres so geometry meets the
-  1-unit-per-metre convention — this let it drop the triplanar path, which was
-  costing **14 ms of a 21 ms budget** in three texture fetches per map per pixel.
-- **`src/main.js`** — `window.__COD__` was being *replaced* after `engine.init()`,
-  silently dropping every hook systems attached during their own init. Several Wave 1
-  agents had each independently grown a re-attach-on-update workaround for it.
-- **`src/render/Sky.js`** — stop double-drawing the dome as `scene.background`; it
-  was a full-screen pass immediately overdrawn by the camera-locked dome.
-- **`tools/shoot.mjs`** — `goldenhour` was `tod: 0.09`, which under the contract's
-  anchors is **02:10, full night**. It had been rendering as moonlit pre-dawn while
-  being reviewed as a golden-hour shot. Now `0.76`.
+**Every budget is blown**: 372 draws vs 350, **63 programs vs a 60 ceiling**,
+1.94 M triangles vs 1.35 M, 21-28 fps vs 60.
 
-**What it did NOT get to** (it died before these): reading each PNG and fixing cheap
-visual wins, and its own final report. So no one has yet done a careful per-shot
-review with fixes — that is the first task on resume.
+Note the resolution change: judged shots now render at **1920x1080** to match the
+references' native size (see "blind test" below), so the table above is NOT
+comparable with the previous handoff's 1600x900 numbers. Measured at 1600x900 on
+the same build, against the Wave 2 baseline:
 
----
+| preset | Wave 2 fps | Wave 3 fps | delta |
+|---|---|---|---|
+| establishing | 41 | 31 | -10 |
+| street | 40 | 28 | -12 |
+| interior | 41 | 36 | -5 |
+| weapon | 38 | 30 | -8 |
+| ads | 36 | 28 | -8 |
+| materials | 49 | 34 | -15 |
+| goldenhour | 39 | 29 | -10 |
+| night | 38 | 27 | -11 |
+| skyline | 40 | 32 | -8 |
+| combat | 41 | 30 | -11 |
 
-## What is actually done
-
-### Infrastructure (all verified working)
-
-| thing | file | state |
-|---|---|---|
-| Fixed-step engine, 120 Hz sim / variable render, system registry | `src/core/Engine.js` | done |
-| Pointer-lock input, edge-triggered actions, rebindable | `src/core/Input.js` | done |
-| Quality tiering (low/medium/high/ultra) from device probe | `src/core/Engine.js` | done |
-| **Screenshot harness** — 10 presets, headless, real GPU | `tools/shoot.mjs` | done |
-| **Blind A/B sheet builder** — randomised panels, separate answer key, source cropping | `tools/blind.mjs` | done |
-| **Contact sheet builder** | `tools/contact.mjs` | done |
-| 20 official Activision reference frames + scored catalog | `refs/`, `refs/catalog.json` | done |
-
-The harness runs on **ANGLE Metal / Apple M2**, not SwiftShader — verified via
-`WEBGL_debug_renderer_info`. What the critics judge is what you would actually see.
-
-### Wave 1 subsystems (landed, integrated, rendering)
-
-- **`src/assets/`** — GPU-procedural PBR texture generation. GLSL noise library
-  (value/simplex/worley/fBm/domain-warp/ridged), 30 material generators split across
-  `generators/{masonry,ground,metal,wood,misc}.js`. Renders to render targets, packs
-  ORM, derives normals from height. **This came out well** — see the `interior` shot,
-  which is accidentally a close-up of the concrete: aggregate pitting, hairline
-  cracks, form-tie holes and rain streaking are all there and read correctly.
-- **`src/render/Materials.js` + `materials/`** — PBR library with `onBeforeCompile`
-  injections for triplanar, detail normals, macro variation, POM, wetness.
-- **`src/render/Sky.js` + `sky/`** — atmospheric scattering LUT, cloud cache, celestial
-  ephemeris (real sun/moon elevation), aerial perspective, PMREM env regeneration.
-- **`src/render/Lighting.js` + `lighting/`** — cascaded shadow maps, PCSS shaders,
-  dynamic light pool with budget enforcement, indirect/irradiance approximation.
-- **`src/physics/`** — hand-written binned-SAH BVH in flat typed arrays, swept capsule
-  character controller, rigid bodies, Verlet ragdoll, debug draw.
-- **`src/player/`** — movement config, springs, view motion, mantle/vault, camera rig,
-  physics bridge. Honours the `camera:override` event the harness needs.
-- **`src/render/PostFX.js` + `passes/`** — TAA, GTAO, SSR, volumetrics, bloom, motion
-  blur, DOF, exposure, LUT grade, sharpen, composite, viewmodel pass.
+**Wave 3 cost 8-12 fps.** Triangles went 1.03 M -> 1.87 M (+81%) and the frame is
+fill-bound, so more geometry covering more pixels with the expensive
+`SurfaceShader` is exactly what the cost model predicts. This was a deliberate
+trade — the frames went from "blockout with blank slabs" to something that can
+plausibly be shown to a critic — but it is a real debt and it is why the fix list
+below puts budget work ahead of any further content.
 
 ---
 
-## What is wrong right now — ranked, with the likely fix
+## What Wave 3 actually fixed, with the root cause in each case
 
-Assessed from `shots/postint/` (contact sheet at `shots/_postint_sheet.png`),
-rendered and reviewed after the integration commit.
+Every one of these was diagnosed in source or in pixels before any code changed.
+That is why the wave landed in one pass.
 
-**Fixed since the last handoff:** blown exposure (root cause was the sun/sky stop
-mismatch, not the exposure pass), golden hour rendering as night, and the 42 fps.
-
-1. **Still clipping to white toward the sun.** `ads`, `materials`, `street`, `weapon`
-   and `skyline` all blow out to flat white down the street axis. Much improved, but
-   the sun sits almost exactly along the street heading, so every ground-level preset
-   shoots straight into it. Two things to try, in order: **re-aim the sun azimuth** so
-   it rakes *across* the street rather than down it (this is what `ART_DIRECTION.md`
-   asks for — the half-sun/half-shadow split is the whole shot), and check the
-   auto-exposure metering weights in `passes/ExposurePass.js` aren't centre-weighted
-   onto the bright end of the corridor.
-2. **The grade is still largely neutral.** There is warmth in `goldenhour` now, but
-   the noon presets have no warm-key/cool-fill separation. → `passes/GradePass.js` +
-   `passes/LUT.js`; confirm the active look isn't stuck on `neutral`.
-3. **Aerial perspective reads as white haze, not coloured depth.** It should tint
-   toward the sky colour in the view direction and leave the far plane readable.
-   → `src/render/sky/AerialPerspective.js`. Partly downstream of #1.
-4. **`goldenhour` has a flat, unlit left block** — the facade facing camera-left gets
-   almost no light and no bounce, so it reads as a cardboard cutout. Likely the
-   indirect/irradiance term not picking up the low sun. → `render/lighting/Indirect.js`.
-5. **`weapon`/`ads`/`combat` presets show no weapon and no bots.** Expected — Wave 2 —
-   but the presets need re-aiming once weapons and AI exist.
-6. **Still a blockout.** No props, clutter, decals, vegetation or interiors. Every
-   surface is clean and undamaged, violating most of the `ART_DIRECTION.md` density
-   rules. This is Wave 2 and is the single largest remaining chunk of work.
-
-Genuinely good already: material response at close range (brick and concrete both
-hold up), the `night` shot end to end, `interior`'s archway framing, shadow softness,
-cobblestone and asphalt ground surfaces, and the lamp-post fixtures.
-
----
-
-## The plan from here
-
-### Wave 2 — content (not started)
-Eight agents on disjoint files, same pattern as Wave 1 (which worked well: 7 parallel
-agents, zero merge conflicts, one integration pass):
-
-| agent | owns | spec |
-|---|---|---|
-| level | `src/world/Level.js` | `docs/ART_DIRECTION.md` — ASHFALL, three-lane, 110×80 m |
-| props | `src/world/Props.js` | density rules in ART_DIRECTION §"Density rules" |
-| vegetation | `src/world/Vegetation.js` | instanced, wind |
-| weapons | `src/weapons/**` | `docs/GAMEPLAY.md` — 6 weapons, procedural viewmodels |
-| fx | `src/fx/**` | impacts, tracers, decals, muzzle, smoke, shells |
-| ai | `src/ai/**` | `docs/GAMEPLAY.md` — navmesh, behaviour tree, ragdoll death |
-| audio | `src/audio/**` | `docs/GAMEPLAY.md` — all WebAudio synthesis, no files |
-| hud | `src/ui/**` | `docs/GAMEPLAY.md` — must support `setVisible(false)` |
-
-Before firing Wave 2, **fix defects 1–4 above first**. They are cheap, they are in
-Wave 1 files nobody else will touch, and every screenshot Wave 2 produces will be
-misleading until the sun azimuth and grade are right. Defect #1 in particular is
-mostly a *sun direction* decision, and it should be made deliberately as art
-direction rather than discovered later — it determines the composition of every
-ground-level shot in the game.
-
-### Wave 3 — the blind critic loop (not started)
-Per camera preset, loop until pass:
-1. `node tools/shoot.mjs --shots <name>`
-2. `node tools/blind.mjs --a shots/<name>.png --b refs/<matched>.jpg --out blind/<name>`
-   (use `refs/catalog.json` for the match; use `--bcrop` for `interior`/`materials`,
-   which have no clean full-frame reference)
-3. Hostile critic agent reads **only** the sheet, scores against `docs/CRITIC_RUBRIC.md`
-4. Fix agent applies the top-5 fixes
-5. Repeat
-
-**Pass condition:** TOTAL ≥ 78/100, zero automatic failures, **and** blind confidence
-≤ 65 %. The confidence term is the real bar — it means the critic genuinely cannot
-tell which panel is ours.
+1. **Facades were not missing — the windows were entombed in solid concrete.**
+   `facade.js` was already placing ~100 windows, but `window_()` put the reveal
+   back at `out = -0.30`, the jambs and returns at `-0.15` and the frame members at
+   `-0.05`, i.e. all behind the wall plane, while `Level.js::_buildBlocks` emitted a
+   solid `BoxGeometry` with no opening cut. Everything except the cill (`+0.055`)
+   and lintel (`+0.03`) was sealed inside the wall and never rasterised. The "few
+   thin horizontal lines" visible on the blank walls were the cills and lintels of
+   windows that did not exist. **Fixed** by building a pier-and-spandrel skin
+   standing 0.28 m proud of the shell, so the openings are voids and the shell face
+   behind each becomes the reveal back for free — no CSG on `Level.js`, no
+   cross-file coupling. Plus a 2048² painted window atlas, deep cornices, quoins,
+   shopfronts, balconies.
+2. **A building was floating.** `Level.js:234` placed a 15x12 m mass at
+   `x[-26.4,-11.4] z[-9,3]` over a room supporting only `x[-14.4,-8.4]
+   z[-11.4,-0.6]` — 86% unsupported including a 12.00 m clear span, plainly visible
+   with sky beneath it in `combat`. **Fixed.**
+3. **The world visibly ended.** Ground plane was `PlaneGeometry(400,400)` (stops at
+   200 m) against a 4000 m camera far plane, while aerial perspective
+   (`density 0.0052`, cap 0.85) does not saturate until 365 m — so the rim was still
+   35% visible as a hard dark band. **Fixed**: the world now ends at ~3 km behind a
+   multi-ring city backdrop. Cranking haze density to hide it would have taken 40 m
+   haze from 19% to 32% and washed out the mid-ground; that was the wrong fix and
+   was explicitly rejected.
+4. **"The far end blows to white"** — on the defect list across two previous work
+   passes with no cause. It is `AerialPerspective.js`: `apIn = apSky + apParams[2].xyz
+   * apPhase` was **unbounded**, and at anisotropy 0.62 the normalised HG peak is
+   ~11.3x, so within ~20° of a low sun the haze rendered *brighter than the sky
+   itself*. Real air only does that inside the ~5° aureole. **Clamped.**
+5. **Clutter read as sprinkled confetti** — not a missing system. `layout.js` already
+   had a full distance-transform + corner + step + wall-normal field sampler, and
+   `fine`/`mid`/`litter` used it correctly. But the ROAD field at `clutter.js:291`,
+   carrying ~3,140 of the pieces, was
+   `(d < 2.4 || d > 12 ? 0 : 1) * (asphalt ? 1 : 0.25)` — and `d` is distance from
+   the nearest obstacle. That is exactly inverted from reality: zero debris within
+   2.4 m of any wall or kerb (where debris actually drifts) and flat uniform
+   probability across the open road (where traffic sweeps it clear). **Fixed**, plus
+   a prevailing-wind lee field so drifts are directional.
+6. **The far ground plate had a mirror sheen.** Not Fresnel — specular aliasing. At
+   200 m the normal map has mipped to a flat average and roughness to its mean, so
+   the GGX lobe becomes a coherent mirror of the sky dome. **Fixed** with a distance
+   roughness floor.
+7. **Bots.** Correcting a misread that is easy to make from a thumbnail: they were
+   never untextured grey mannequins — the kit palette and `vertexColors` were
+   working. The real faults were a featureless ovoid head rendering pale white, tube
+   limbs with no articulation, **no hands**, and no gear breakup. Rebuilt, merged to
+   one material / one mesh, T-pose made structurally unreachable.
+8. **Laundry read as flat black trapezoids.** It was `fabric_canvas` with no edge
+   and no chroma. Now real cloth with folds, catenary sag, scalloped hem.
 
 ---
 
-## Things you should know before continuing
+## Known defects, located, ranked — this is the fix list
 
-- **The scope call I made:** the game deliberately avoids photoreal humans. Procedural
-  skin/cloth/faces lose a blind test instantly and no amount of iteration fixes that.
-  The whole art direction is aimed at environment, light, atmosphere and surface,
-  where a good renderer can genuinely trade blows. `refs/catalog.json` scores every
-  reference frame for character-dominance so the critic never compares our empty
-  street against a CoD hero close-up.
-- **Honest expectation:** individual environment frames reaching coin-flip confidence
-  is achievable. Matching the full game — animation, audio, content volume, mocap —
-  is thousands of person-years and will not happen. Judge this on the frames.
-- **Long-running agents can die on auth expiry and lose their report.** That is what
-  happened to the Wave 1 integrator — its file edits survived on disk but its summary
-  and its remaining checklist did not. When fanning out Wave 2, have each agent commit
-  its own work as it goes rather than only at the end, so a mid-run death costs the
-  report and not the work.
-- **The parallel-agent pattern works well.** 7 agents, 17k lines, zero merge
-  conflicts, one integration pass. The thing that made it work is `ARCHITECTURE.md`:
-  disjoint file ownership, a written `ctx` API contract, and every agent told to
-  verify with `vite build` + the screenshot harness before reporting. Keep all three.
-- **`refs/`, `shots/`, `blind/`, `dist/`, `node_modules/` are gitignored.** The
-  reference screenshots are official Activision press images used locally and
-  transiently for critique; they are never redistributed or shipped with the build.
-- The architecture contract in `docs/ARCHITECTURE.md` is what let 7 agents write
-  17k lines simultaneously without a single merge conflict. Keep enforcing disjoint
-  file ownership and the `ctx` API boundaries when you fan out Wave 2.
+Every one of these was found and reported by an agent that could not fix it because
+it was outside their file ownership. They are all specific.
 
----
+**Budget regressions (block everything):**
+1. **63-64 shader programs against a 60 ceiling.** The wave overspent. `combat` is
+   worst. Several agents already dropped features to buy programs back (clearcoat on
+   glass was cut, costing visible glass quality; smoke columns were cut entirely).
+   Needs a proper program audit — `signature()` in `SurfaceShader.js` is what forks.
+2. **372 draw calls vs 350.** The `vehicles` BatchSet is the main overrun: built with
+   the default 45 m `ZONE_LEN` and shadows on, an 8-entry variant table costs
+   **16 draws, not the 4 it was funded for** (zones x shadow-flags x variants).
+3. **1.94 M triangles vs a 1.35 M budget.**
 
-## Integration visual pass (resumed)
-
-Picks up the checklist the Wave 1 integrator died before finishing. Ten presets
-re-rendered after every change at 1600x900 into `shots/fix/`, contact sheet at
-`shots/_fix_sheet.png`, and every claim below was checked against the PNG, not
-inferred. Baseline for comparison: `docs/state-at-pause.png` / `shots/base/`.
-
-**Final harness numbers:** 60 fps, 178 draw calls, 2180 tris, 32 programs,
-`errors: []`, ANGLE Metal / Apple M2. (Draw calls fell 210 -> 178 purely from
-cascade culling once the sun moved off the street axis.)
-
-Each item was committed separately, so a mid-run death costs the report and not
-the work: `3851819`, `97c399e`, `070d121`, `5095307`, `a784463`.
-
-### 1. Sun azimuth — FIXED. `src/render/sky/constants.js`
-
-`NORTH_OFFSET` -90 deg -> **-25 deg**. That is the map's compass orientation and
-it is the only knob; every other sun/moon/star consumer derives from it.
-
-The street runs along Z. At -90 the mid-morning sun came up 6 deg off the street
-axis, so `street`/`ads`/`weapon`/`materials`/`skyline` all shot into the disk.
-At -25 the sun bearing is +66 deg from the street axis at tod 0.30 (the
-"MORNING RAID" primary look) and +71 deg at 0.32, elevation unchanged at
-23-28 deg. Rationale, written up in full in the comment on the constant:
-
-- the disk sits outside a 70 deg-fov frame looking down the street;
-- the sun is on the +X (east) side, so the west facades are in hard sun and the
-  east facades fall to sky fill — the warm-key / cool-fill split;
-- the east blocks' staggered heights (10.5 / 15.5 / 8.0 / 19.0 m) cast across
-  the 22.8 m facade-to-facade corridor, so the road is mostly shadow with a
-  sunlit pool opening mid-corridor behind the short 8 m block;
-- light rakes into the west room's east-facing doorway, so `interior` gets a
-  real shaft;
-- at golden hour the same offset swings the low sun round to -X, which turns the
-  establishing camera's back-light into a cross-frame rake.
-
-**Evidence:** in the baseline `street`/`ads`/`weapon` the far half of the frame
-is a single white field with no shadow anywhere on the road. After: a hard
-shadow edge runs diagonally across the asphalt, the west facades are cream and
-the east facades are blue-shadowed, and the sky resolves as blue with clouds.
-This is the highest-value change in the pass by a wide margin.
-
-### 2. Auto-exposure metering — FIXED. `src/render/passes/ExposurePass.js`
-
-Yes, the residual clipping was metering. The meter was a centre-weighted log
-average, which on a half-sun / half-shadow street keys to the shadow half.
-
-The seed pass now accumulates the **second moment** of log luminance as well as
-the first; adapt keys off `exp(mean + 0.62 * sigma)` — log luminance is close
-enough to normal that this is a percentile, roughly the 73rd — with sigma capped
-at 1.75 so a night frame of black street plus three sodium lamps does not meter
-itself into the ground. Centre weighting widened (Gaussian 2.0 -> 1.15). The
-luminance chain moved to `FloatType`: the variance is a difference of two
-similar second moments and half float loses it in the noise.
-
-**Evidence:** pixels sitting at the display ceiling, across the daytime presets,
-went from 8-17% of the frame to 0-1.1%. `street` 16.6% -> 0.08%. The sky is
-still bright, as intended; the concrete is no longer white.
-
-### 3. Grade — FIXED. `src/render/passes/LUT.js`
-
-The active look was **not** stuck on neutral — `PostFX._updateLook` was already
-crossfading to `warm_desert` by day and `night_teal` at night with
-`lutStrength` 1. The look itself was near-neutral: `sat` 1.07 with a mild shadow
-pull, so noon read blue-grey.
-
-Added `otBoost` to the bake: project the residual chroma onto a
-luminance-neutral orange/teal axis (unit chroma of a saturated orange, dot with
-the luma weights ~2e-4) and re-add a fraction of it. `warm_desert` now runs
-`sat` 0.88 — the ~12% global desaturation ART_DIRECTION asks for — plus
-`otBoost` 0.42, so greens and magentas stay muted while warm keys and cool fills
-keep their chroma. Split tone strengthened both ways, `blackLift` 0.013 ->
-**0.022** so the toe stops above the 0.02 the spec requires. `night_teal` and
-`cold_urban` get a gentler boost and the same lift.
-
-**Evidence:** `street` mean saturation 0.34 -> 0.43 with 1st-percentile luma
-6.4 -> 8.8 (nothing crushed). Visually the frame now separates into cream
-sunlit concrete against blue-teal shadow instead of one grey.
-
-### 4. Aerial perspective — FIXED. `src/render/sky/AerialPerspective.js`, `src/render/Sky.js`
-
-Two independent faults.
-
-*Colour:* the inscatter was a single constant (horizon radiance x 0.82) for
-every view ray, so it painted one flat sheet over the frame. The shader now
-blends horizon -> zenith radiance by view elevation and darkens toward a
-ground-bounce term looking down, on top of the existing HG sun lobe.
-`apParams` grew 4 -> 5 vec4s for the zenith colour and ground falloff.
-
-*Amount:* density was 0.0011/m, i.e. **6% opacity across the market street's
-70 m sightline** — invisible, against ART_DIRECTION's "visibly desaturate and
-lift the blacks at 40 m+". Now 0.0052/m: ~19% at 40 m, ~30% at 70 m, ~0.6 at
-200 m, capped at 0.85 so the far plane stays readable.
-
-**Evidence:** `skyline` now resolves three depth planes — crisp foreground
-masonry, lightly hazed mid blocks, far lamps and barriers still legible inside
-strong haze — and the haze is blue looking up and warm looking toward the sun
-rather than white everywhere.
-
-### 5. Golden-hour unlit facade — FIXED, but mostly by item 1. `src/render/lighting/Indirect.js`
-
-The specific symptom (the camera-left block reading as a cardboard cutout) was
-resolved by the sun re-aim: at tod 0.76 the -25 deg offset puts the low sun off
-to camera-left, so both blocks now take a warm key. See `shots/fix/goldenhour.png`.
-
-Two genuine defects in the indirect term were still there and are fixed:
-
-1. **The sky fill had no azimuth.** One averaged horizon colour was projected
-   round the whole ring, so a facade facing the sun's half of the sky got the
-   same fill as one facing away. The horizon band and the ground bounce now vary
-   with alignment to the sun's azimuth (ring gain 0.60-1.72 at low sun, flat at
-   high sun, mean ~1.15, so it redistributes rather than adds). The circumsolar
-   lobe was broadened off `d^3` — SH9 cannot carry a tight lobe and the deringer
-   was eating most of it.
-2. **The ambient floor floored nothing.** "Never let an interior fall to pure
-   black; the hemisphere is the floor" was a fixed 0.05 intensity against an HDR
-   `skyColor` in `sky.exposure` units — under 2% of the real fill at noon. It is
-   now anchored to the DC term of the projected sky and opens up as sky
-   visibility closes down.
-
-**Evidence:** median luma `interior` 34.6 -> 43.0, `night` 43.4 -> 50.6,
-`street` 30.3 -> 38.5, with no change in ceiling pixels. In `interior` the brick
-around the doorway now carries visible tone and detail instead of reading as a
-flat silhouette.
-
-**Still wrong here:** the fix barely moved the *street* shadow side, because at
-`ambientScale` 0.32 the probe is only a third of the sky fill — `scene.environment`
-(PMREM of the dome, `envMapIntensity` 1) supplies the rest and is untouched by
-any of this. The measured lit/shadow contrast on concrete is 3.2 stops, which is
-physically about right, so this is not an under-lighting bug; see the tone-range
-note below.
-
-### Extra fixes (budget was left over)
-
-**6. Soft print shoulder — `src/render/passes/LUT.js`.** `ART_DIRECTION.md`
-requires a soft highlight rolloff and there was none; the S-curve pushed
-highlights up and `whiteCut` then clipped them. Measured against `refs/`, real
-CoD daylight frames sit at p95 150-225 / p99 197-242 while ours were p95 243-247
-/ p99 246-250 — several percent of every frame pinned flat against the ceiling
-with no separation left in it. Added a Reinhard knee above 0.70 (unit slope at
-the join, ceiling approached asymptotically) to all three active looks and
-dropped `whiteCut` to 0. Across the ten presets: **p95 243 -> 228, p99 246 ->
-233, zero pixels within 5 of white anywhere**, medians up 5-10. Visually the
-sunlit facades now hold tone across the whole surface instead of going to a flat
-cream field.
-
-**7. Vignette 0.34 -> 0.20 — `src/render/PostFX.js`.** The old curve took the
-bottom frame corners down 31%, which on every street-level preset is exactly
-where the shadowed half of the road sits, so it read as a black wedge. Applied
-after metering, so image only. `street` median 38.7 -> 40.4, sub-12 pixels
-7.9% -> 6.9%.
-
-**Non-fix, recorded so nobody repeats it:** raising `asphalt`'s `color` in
-`MaterialDefs.js` does nothing. `Materials.js:241` is
-`mat.color.setHex(has.map ? (def.mapTint ?? 0xffffff) : def.color)` — every
-mapped material ignores `def.color` entirely and takes its albedo from the
-generator (`GROUND.asphalt`, `bitumen = vec3(0.118, 0.113, 0.110)`, which is
-already a correct aged-asphalt reflectance). Change the generator or add a
-`mapTint`, not `color`. The edit was made, measured as a byte-identical render,
-and reverted.
-
-### Top remaining visual defects, ranked
-
-1. **Shadowed asphalt reads dark and very blue** — 12,18,40 sRGB in the `street`
-   foreground, an R:B ratio of 1:3.3. It is *physically* right: a neutral surface
-   lit only by a Rayleigh sky renders that blue, and the measured lit/shadow
-   contrast on concrete is 3.2 stops, which is correct. It is *photographically*
-   wrong, for two reasons, and neither is cheap:
-   - No large-scale bounce. The sunlit west facade should be throwing warm light
-     across the road and nothing models that. `Indirect.js` probes only gather
-     from `lightSpecs` fixtures, not from sunlit static geometry.
-   - The env-map path dominates the sky fill and carries the raw spectral sky.
-     `Indirect._projectSky` desaturates its own copy 34% toward luminance, but at
-     `ambientScale` 0.32 the probe is only a third of the fill; the PMREM supplies
-     the rest at full chroma. Rebalancing (probe up, `Materials.envScale` down)
-     would work but `envMapIntensity` also drives specular, so it would dull the
-     wet-asphalt reflections `night` depends on. Wants a measured pass, not a
-     guess.
-2. **`establishing` and `goldenhour` are framed into a wall.** The preset camera
-   at (26, 9.5, 34) sits behind the east block row (x 11.4..26.4, parapet top
-   11.4 m at z 9.5..22.5), so it looks at brick, not at the map. That is why
-   "three depth planes in `establishing`" cannot be demonstrated in that frame —
-   `skyline` had to stand in. Fixing it is a one-line camera move in
-   `tools/shoot.mjs`, which was out of scope for this pass. **Do this first next
-   time** — it is the shot the whole map should be judged on and it is currently
-   blind.
-3. **No shadow *structure* on the near foreground road in `street`/`ads`/`weapon`.**
-   The camera stands inside the shadow of a 15.5 m block, so the bottom half of
-   the frame is one unbroken dark field — close to the rubric's "the frame is
-   mostly one colour" automatic failure. Wave 2 clutter fixes this by
-   construction; until then the frames are bottom-heavy.
-4. **Highlights still ~5-15 above the reference band on some presets** (p95 228
-   vs the references' 150-225). The shoulder closed most of the gap; the rest is
-   composition — our frames have more sunlit concrete in them than the
-   references, which are character-forward.
-5. Everything in the pre-existing list from items 5 and 6 above (no weapon, no
-   bots, still a blockout) is unchanged and still true.
-
-### Tooling note
-
-The three scratch scripts this pass leaned on are not committed (they are
-throwaway and `tools/` was out of scope), but they are trivial to rebuild and
-they are what made "did it actually improve" answerable rather than a matter of
-opinion:
-
-- a **histogram tool** — decodes a PNG in headless Chromium and prints
-  clipped %, crushed %, min/mean luma, mean saturation and p01/p05/p50/p95/p99.
-  Run it on `refs/*.jpg` as well as `shots/*.png`: the reference frames are a
-  calibration target for the tone curve, not just something to look at.
-- a **region probe** — mean sRGB of a named rectangle, for comparing a sunlit
-  facade against a shadowed one across a change.
-- a **sun-bearing calculator** — reimplements `horizonDir()` so a candidate
-  `NORTH_OFFSET` can be checked against every time-of-day anchor before
-  rendering anything.
+**Visible defects:**
+4. **A four-pane window quad is lying flat on the carriageway**, rendering as a 2x2
+   grid of pale parallelograms with a mullion cross. Reproducible in `street` around
+   x=990,y=650 and x=700,y=455. Unambiguous at 6x zoom.
+5. **Aerial perspective is too strong at 60-90 m.** Measured: the corridor end is
+   0.959 of a clear-sky patch against an acceptance target of 0.42-0.80 — the
+   vanishing point is a white plug. This is the *remaining half* of defect 4 above:
+   the additive term is clamped, but the density is now too high for the new
+   backdrop distance.
+6. **`Backdrop.js` north terminator renders as a blank, untextured, near-blown-out
+   card** filling the corridor vanishing point (the 36x15.5x11 box at ~line 240).
+   Directly related to 5.
+7. **Bots miss their contrast target.** Measured ΔL* between each bot and its
+   background annulus: 23.9, 16.6, 11.6, 15.8 against a required 22. Two of four are
+   *lighter* than the shaded street behind them.
+8. **Every vehicle leaves a large near-white ground patch** the size of its collider
+   box (`groundingDust`). Clearly visible under each car.
+9. **Awnings are not bound to shopfront bays.** `facadeDetail()` returns
+   `{parts, sills}` and never a `bays` array, so `Props.js`'s `env.bays = fac.bays || []`
+   is always empty and the consuming path in `overhead.js` is dead code. One-line fix
+   in `facade.js` plus one in `Props.js`.
+10. **Rust streaks are not anchored** to AC units and drainpipes for the same reason
+    (`sills` is not forwarded).
+11. Hanging cloth in `overhead.js:140/209/217` and `furniture.js:247/254` still uses
+    `twoSided()`, so it has a razor silhouette with no lit rim. `shellGeo()` exists
+    and is unit-tested for exactly this; it just has no callers.
 
 ---
 
-## Preset reframing (final change before the pause)
+## Process lessons that cost real work this session
 
-`establishing` and `goldenhour` had been framing into a brick wall. Both preset
-cameras were authored against the scaffold's scattered-box placeholder and were
-never re-aimed when the street layout replaced it — `establishing` sat behind the
-east block row, and after a first correction landed on a rooftop instead.
+- **Two agents reverted 1,333 lines of another agent's committed work** by sweeping
+  stale working-tree copies of files they did not own into their own commits
+  (`d7235fc`, `5f7d2c8`; undone by `dfb5dea`). The wave prompt told agents to
+  `git add <specific files>` and never `git add -A`; that instruction was not
+  followed by everyone. **Next wave: make it a hard, repeated instruction, and
+  verify each agent's commit touched only its owned paths.**
+- **Vite HMR reloads the page mid-capture** when several agents are saving files, so
+  `tools/shoot.mjs` fails with "Execution context was destroyed". Three of one
+  agent's seven capture attempts died this way. Build to a static `dist/` and serve
+  that when measuring during a wave.
+- **`tools/shoot.mjs` reuses an already-listening dev server on `--port`.** If an
+  earlier run left vite on your port from a *different working directory*, every
+  subsequent measurement silently profiles the wrong tree. Cost two agents a bad
+  measurement each.
+- **The first shoot of a session reports garbage fps** (street at 12 fps with
+  identical draws/tris; subsequent runs 50-53). Discard run 1 or extend warmup.
+- **Run-to-run noise on an identical build is meanAbsDiff 2.53/255** because animated
+  cloud and dust are not frozen by the settle. Anything whose visual delta is under
+  ~3 cannot be A/B'd numerically with this harness.
+- Parallel agents on genuinely disjoint files still works — this wave was 9 agents,
+  40 commits, and the only merge damage was the `git add -A` incident above.
 
-- `establishing` → `[4, 17, 33]` looking at `[-1, 1.5, -20]`, fov 60. Elevated,
-  over the street rather than beside it, so the whole three-lane layout, both
-  facade rows, the shadow split and the sky all read in one frame.
-- `goldenhour` → dropped to ground level at `[4.5, 1.75, 18]`, fov 65. It had been
-  sharing the establishing camera; the point of the shot is shadows raking the
-  length of the street, which only reads from down in it.
+---
 
-Both verified at 60 fps, `errors: []`.
+## The blind test — still never run, and now finally trustworthy
 
-**What this exposed, and what to fix first on resume:** at the new establishing
-altitude the ground plane ends in a visible dark band at the horizon, and the
-rooftops are completely empty. Neither was visible from the old camera. The
-rooftops are a Wave 2 props job (ART_DIRECTION calls for AC units, walkways,
-cables); the horizon band needs either a larger ground extent or a distant
-silhouette layer.
+`tools/blind.mjs` had **two methodology leaks that would have invalidated its own
+verdicts**, both fixed this session:
 
-**Preset hygiene rule going forward:** every time the level geometry changes
-materially, re-verify all 10 presets still frame something worth judging. Three
-separate agents have now each independently reviewed a shot that was pointed at a
-wall and reported on the wall.
+- The references are JPEG press images and our frames were PNG, so only one panel
+  carried ringing and 8x8 blocking. A critic noticing compression artefacts had
+  identified the panels without judging a single pixel of render quality. Both
+  panels are now round-tripped through JPEG at matched quality (`--jpegq`, 0.92).
+- The two sources are authored at different resolutions and were being scaled by
+  different ratios, leaving one visibly crisper. Panels now resolve to a common
+  native width; `tools/shoot.mjs` defaults to 1920x1080 so neither is resampled.
+- Panel order is now `--seed`-based: reproducible for audit, but re-randomisable so a
+  critic scoring ten sheets cannot learn "ours is always LEFT on street".
+
+**Any blind-confidence number produced before this session is meaningless.** No
+verdict has ever been produced at all.
 
 ---
 
 # WHERE TO PICK UP
 
-*(This section is the resume point. Written 2026-07-25 late, after Wave 2 content
-landed and integration was interrupted for usage limits.)*
+Do these in order. The first two are cheap and unblock honest judgement.
 
-## Current measured state
-
+### 1. RUN THE BLIND CRITIC. It has never executed once.
+This is the entire point of the project and every wave so far has deferred it. The
+frames are now good enough that the answer will be informative rather than merely
+humiliating, and the harness is finally clean.
 ```
-node tools/shoot.mjs --port 5361 --out shots/wave2 --w 1600 --h 900
+node tools/shoot.mjs --out shots/judge            # defaults to 1920x1080
+node tools/blind.mjs --a shots/judge/street.png --b refs/bo6_05.jpg \
+     --out blind/street --label "ground-level street" --seed run1
 ```
-`errors: []`, all 10 presets render. Per-shot (the harness now reports per-shot
-rather than one misleading aggregate — that was a real bug in the tooling):
-
-| preset | fps | draws | tris |
-|---|---|---|---|
-| establishing | 41 | 305 | 1.03 M |
-| street | 40 | 317 | 1.03 M |
-| interior | 42 | 305 | 1.03 M |
-| weapon | 38 | 346 | 1.05 M |
-| ads | 36 | 332 | 1.05 M |
-| materials | 49 | 213 | 0.94 M |
-| goldenhour | 39 | 315 | 1.03 M |
-| night | 38 | 328 | 1.03 M |
-| skyline | 41 | 304 | 1.02 M |
-| combat | **41** | **358** | **1.10 M** |
-
-`withinBudget: false` — 358 draws > 350 budget, 36 fps < 60 target.
-
-## Do these in order
-
-### 1. PERFORMANCE — blocking everything else
-Triangles went 2.2 k → 1.1 M and draws 178 → 358 in one wave. fps roughly halved.
-Before adding a single further feature, get back inside 350 draws / 60 fps.
-Leads, cheapest first:
-- `ctx.props.setDensity()` exists — find the knee where the frames still read dense.
-- Instancing coverage: 6 k merged clutter pieces across 11 silhouettes is good, but
-  check stalls, drums, barriers and cables are batched too.
-- LODs and distance culling on props; bots already cull shadows past 34 m.
-- Programs hit 59 against a 60 budget — nearly out of shader slots. Audit for
-  material overrides that are forking programs unnecessarily.
-- Profile before optimising. It may be fill/post cost, not geometry.
-
-### 2. FINISH WAVE 2 INTEGRATION
-It got ~80% through. Remaining, from its own task list:
-- Re-aim the 10 camera presets now that props, weapons and bots exist. Several
-  frame badly. **Preset hygiene rule: three separate agents have each reviewed a
-  shot pointed at a wall and dutifully reported on the wall.**
-- Read every PNG and fix cheap visual wins.
-- Confirm all `window.__COD__` hooks merge rather than replace (one double-wrap of
-  the `stageCombat` chain was already found and fixed — check for others).
-
-### 3. RUN THE BLIND CRITIC — never yet done
-This is the whole point of the project and it has never executed once.
-```
-node tools/blind.mjs --a shots/wave2/street.png --b refs/bo6_05.jpg --out blind/street --label "ground-level street"
-```
+Pairs from `refs/catalog.json`: `street`→`bo6_05`, `establishing`→`mw3_04`,
+`goldenhour`→`mw3_07`, `night`→`bo6_06`. `interior` and `materials` have no clean
+full-frame reference — use `--bcrop` to pull an environment-only region out of
+`bo6_03` or `mw3_08`.
 Then have a critic agent read `blind/street.png` **only** — never
-`blind/street.key.json` until after it has committed to a verdict — and score
-against `docs/CRITIC_RUBRIC.md`.
-Matched pairs from `refs/catalog.json`:
-`street`→`bo6_05`, `establishing`→`mw3_04`, `goldenhour`→`mw3_07`, `night`→`bo6_06`.
-`interior` and `materials` have no clean full-frame reference — use `--bcrop` to pull
-an environment-only region out of `bo6_03` or `mw3_08`.
+`blind/street.key.json` until it has committed to a verdict — and score against
+`docs/CRITIC_RUBRIC.md`. Pass: TOTAL ≥ 78, zero automatic failures, blind
+confidence ≤ 65.
 
-Pass condition: TOTAL ≥ 78/100, zero automatic failures, blind confidence ≤ 65.
+### 2. Fix the four cheap visible defects
+Items 4, 5, 6 and 8 in the defect list: the window quad on the road, the
+over-dense haze plugging the corridor, the blank backdrop terminator, and the
+white dust patches under vehicles. All are small, all are clearly visible in a
+judged frame, and 5 and 6 are the same defect from two directions.
 
-### 4. THEN loop: critic → fix → re-render, per preset, until pass.
+### 3. Programs and draw calls back inside budget
+63 programs against a hard 60 ceiling is the real blocker — it has already cost
+visible quality (glass clearcoat, smoke columns) in features agents dropped to
+stay under it. Start with the `vehicles` BatchSet's 16-draw overrun and a
+`signature()` audit in `SurfaceShader.js`.
 
-## My own read of the frames (looked at, not inferred)
+### 4. THEN performance, and only against the measured model
+Target the ~5 ms of **shadow sampling**, not cascade count or map size. Options:
+a half-resolution shadow mask with bilateral upsample; fewer PCSS taps with
+blue-noise offsets accumulated through TAA; an early-out for fully-lit and
+fully-shadowed regions. Contact-hardening must survive — it is rubric dimension 3.
+Second target is `SurfaceShader` fragment cost on the wall pixels that fill the
+frame. **Do not spend a wave cutting props or draw calls; the measurement says it
+will not work.**
 
-Good: `goldenhour` is the strongest frame in the project — warm raking light, real
-clutter, believable depth. `night` reads well. The viewmodel and red-dot optic in
-`ads` and `weapon` are convincing. Overhead cables and laundry lines fixed the empty
-upper frame. The `combat` tableau has bots, tracers and smoke reading as a real moment.
+### 5. Then loop: critic → fix → re-render, per preset, until pass.
 
-Still not AAA, honestly:
-- **Facades are still flat boxes with no windows or doors.** At distance the buildings
-  read as untextured slabs. This is the single biggest remaining visual gap and it is
-  a Level.js job, not a props job.
-- The far end of the street still blows to white in several daytime presets.
-- `establishing` has an odd hard horizon band where the ground plane ends.
-- Ground clutter is well distributed but reads slightly "sprinkled" — uniform density
-  rather than accumulating in drifts against obstacles.
-
-## Process notes that earned their place
-
-- **Commit after every unit of work.** Auth expiry has now killed a run three times.
-  Each time, the incrementally-committed work survived and only the report was lost.
-  The 49 commits from the Wave 2 content run are entirely due to this rule.
-- The parallel-agent pattern keeps working: 5 agents, 49 commits, zero merge
-  conflicts. `docs/ARCHITECTURE.md` disjoint file ownership is what makes it safe.
-- Agents given `tools/` as out-of-scope will correctly report a broken preset and
-  correctly refuse to fix it. Give the integrator `tools/` access explicitly.
+## Tools added this session
+- `tools/profile.mjs` — frame-budget attribution. Toggles one thing at a time
+  against a re-measured baseline, medians six 500 ms buckets after discarding two,
+  reports baseline drift so an effect smaller than the noise is called noise.
+- `tools/crop.py` — GPU-free PNG crop and magnify (pure zlib, no dependencies), so
+  frame detail can be inspected while a measurement is in flight. Everything else
+  here drives Chromium and contends for the GPU.
+  `python3 tools/crop.py in.png out.png --rect x,y,w,h --zoom 4`
+  (Known limit: `--zoom` is int-only, so it can magnify but not reduce.)
+- `tools/shoot.mjs --checks` — computes the numeric acceptance criteria instead of
+  asking a reviewer to eyeball them. Three read-distance presets (`read5`,
+  `read30`, `read80`) were added for surface-detail judgement.
