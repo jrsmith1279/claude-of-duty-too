@@ -49,6 +49,13 @@ const HIP_HALF = LIMB.hipHalf;
 const ROLL_LIFT = 0.118;
 const ROLL_PULL = 0.07;
 
+// Structural pose limits. These are not tuning values — they are the two
+// constraints that make a T-pose unreachable rather than merely unlikely.
+// An elbow may rise 0.42 rad above the shoulder plane; a wrist may sit 0.55 m
+// to the side of the sternum. Both are generous for any real rifle carry.
+const ELBOW_RISE = Math.sin(0.42);
+const WRIST_LATERAL = 0.55;
+
 // Standing hip height is deliberately 3.5 cm below the rest pose's 0.940. At
 // 0.940 the leg is dead straight — the rig's hip-to-ankle distance is 0.841 and
 // the drop from hip to ankle is 0.840 — so there is literally no fore-aft
@@ -127,6 +134,10 @@ class Foot {
   }
 }
 
+// One-shot so a genuinely broken pose reports itself once instead of filling
+// the console at 60 Hz with the same line.
+let _warned = false;
+
 export class BotAnimator {
   /**
    * @param {Map<string, THREE.Bone>} bones  from `createSkeleton().byName`
@@ -145,6 +156,8 @@ export class BotAnimator {
     this.recoil = new Spring(0, 26);
     this.bobT = 0;
     this.speedSmooth = 0;
+    // [left, right] wrist-to-grip error in metres; see `_solveArm`.
+    this.gripMiss = new Float32Array(2);
     this.yaw = 0;
     this.prevYaw = 0;
     this.turnRate = 0;
@@ -548,15 +561,34 @@ export class BotAnimator {
     _c.copy(SIGHT).applyQuaternion(_q0);
     _b.sub(_c);                                              // aimed weapon origin
 
-    // Low-ready pose, in rig space: carried out in front across the body,
-    // muzzle down. Far enough forward that the arms extend rather than fold.
-    _eu.set(-0.46 + ap * 0.35, ay * 0.55 - 0.14, 0.24, 'YXZ');
-    _q1.setFromEuler(_eu);
-    _d.set(0.120 + bobX, 1.075 - crouch * 0.19 + bobY, 0.285 - crouch * 0.02);
+    // The UNAIMED carry. Authored as an explicit bore direction rather than as
+    // an euler triple, because the weapon's forward is +Z and a positive X
+    // euler tips +Z DOWNWARD — the pose this replaces asked for "muzzle down"
+    // and got 26 degrees of muzzle UP.
+    //
+    // Two carries, and the pose is forced rather than blended toward rest: a
+    // bot that is not aiming still has both hands on the weapon, always.
+    if (s.carry === 'high-port') {
+      // Weapon at 62 degrees muzzle-up, held high across the chest so the
+      // barrel crosses the head silhouette on a diagonal. That single dark bar
+      // is most of what makes mw3_05's runner read instantly as a soldier.
+      boreQuat(1.082, ay * 0.25 - 0.35, 0.34, _q1);
+      _d.set(0.020 + bobX, 1.300 - crouch * 0.16 + bobY, 0.160);
+    } else {
+      // Low ready: muzzle depressed 25 degrees and swung 15 degrees across the
+      // body, carried far enough forward that the arms extend rather than fold.
+      boreQuat(-0.436 + ap * 0.30, ay * 0.50 - 0.262, 0.24, _q1);
+      _d.set(0.120 + bobX, 1.075 - crouch * 0.19 + bobY, 0.285 - crouch * 0.02);
+    }
     _d.y += this.hipSpring.x - s.pos.y - STANCE.stand.hip;
 
-    this._weaponP.lerpVectors(_d, _b, aim);
-    this._weaponQ.copy(_q1).slerp(_q0, aim);
+    // Snap rather than mush: below 0.35 the carry is fully committed, above
+    // 0.85 the sights are fully up, and the transition happens in between. A
+    // linear blend leaves a bot at aim 0.25 holding the rifle in a pose that is
+    // neither, which reads as a mannequin being posed by a level editor.
+    const carry = THREE.MathUtils.smoothstep(aim, 0.35, 0.85);
+    this._weaponP.lerpVectors(_d, _b, carry);
+    this._weaponQ.copy(_q1).slerp(_q0, carry);
     // Recoil: straight back down the bore, with a muzzle rise.
     this._weaponP.addScaledVector(_a, -recoil * 0.055);
     _eu.set(-recoil * 0.22, 0, 0, 'YXZ');
@@ -592,6 +624,16 @@ export class BotAnimator {
     const left = S === 'L';
     _a.copy(grip).applyQuaternion(this._weaponQ).add(this._weaponP);  // grip, rig
 
+    // WRIST LATERAL LIMIT. A hand may never be further than 0.55 m to the side
+    // of the sternum. Every T-pose this rig has ever produced started with a
+    // grip target that had wandered out past the shoulder, and clamping the
+    // TARGET is the only place the constraint can be enforced without fighting
+    // the analytic solver.
+    const lateral = _a.x - this._P.chest.x;
+    if (Math.abs(lateral) > WRIST_LATERAL) {
+      _a.x = this._P.chest.x + Math.sign(lateral) * WRIST_LATERAL;
+    }
+
     const shoulderRest = left ? REST.shoulderL : REST.shoulderR;
     const armRest = left ? REST.armL : REST.armR;
     _b.copy(shoulderRest).sub(REST.chest).applyQuaternion(this._Q.chest).add(this._P.chest);
@@ -616,6 +658,23 @@ export class BotAnimator {
     // and the bot reads as a scarecrow, which is exactly what it did.
     _c.set(left ? -0.26 : 0.30, -1.0, -0.30 + crouch * 0.1).normalize();
     solveTwoBone(_d, _a, LIMB.upperArm, LIMB.forearm, _c, _e, _f);
+    // ELBOW CEILING. The pole vector makes a splayed elbow unlikely; this makes
+    // it impossible. The elbow is rolled about the shoulder-to-grip axis until
+    // it is back under the ceiling, which is the one degree of freedom a
+    // two-bone solve has left and therefore the only correction that does not
+    // move the hand off the grip.
+    clampElbowRise(_d, _a, _e, _f, LIMB.upperArm, ELBOW_RISE);
+
+    // How far the wrist actually ended up from the grip it was asked to hold.
+    // Free — the solved directions are already here — and it is the assertion
+    // that a forced low-ready really does keep both hands on the weapon.
+    _g.copy(_d).addScaledVector(_e, LIMB.upperArm).addScaledVector(_f, LIMB.forearm);
+    this.gripMiss[left ? 0 : 1] = _g.distanceTo(_a);
+    if (BotAnimator.assertPose && this.gripMiss[left ? 0 : 1] > 0.35 && !_warned) {
+      _warned = true;
+      console.warn('[BotAnimator] hand %s is %s m off the weapon centreline',
+        S, this.gripMiss[left ? 0 : 1].toFixed(3));
+    }
 
     const arm = this.bone('arm' + S);
     const fore = this.bone('forearm' + S);
@@ -653,6 +712,9 @@ export class BotAnimator {
     return out;
   }
 }
+
+/** Opt-in pose assertion; off by default because it costs a branch per arm. */
+BotAnimator.assertPose = false;
 
 // -------------------------------------------------------------------- helpers
 
@@ -696,6 +758,71 @@ export function solveTwoBone(root, target, l1, l2, pole, outUpper, outLower) {
   outLower.copy(target).sub(_ik2);
   if (outLower.lengthSq() < 1e-8) outLower.copy(outUpper);
   outLower.normalize();
+}
+
+const _cl0 = new THREE.Vector3();
+const _cl1 = new THREE.Vector3();
+const _cl2 = new THREE.Vector3();
+
+/**
+ * Roll a solved elbow about the shoulder-to-grip axis until it sits no higher
+ * than `maxRise` (as sin of the angle above the shoulder plane).
+ *
+ * The two-bone solve fixes the elbow's distance from both ends; the only thing
+ * still free is where it sits on the circle round the root-to-target axis. So
+ * the correction is exactly a rotation about that axis, which means the hand
+ * cannot move and the segment lengths cannot change — the constraint is
+ * satisfied without perturbing anything else. Writing `upper` also requires
+ * re-deriving `lower`, since the elbow has moved.
+ */
+function clampElbowRise(root, target, upper, lower, l1, maxRise) {
+  if (upper.y <= maxRise) return;
+  _cl0.copy(target).sub(root);
+  const len = _cl0.length();
+  if (len < 1e-6) return;
+  _cl0.multiplyScalar(1 / len);                     // axis
+  const along = upper.dot(_cl0);
+  _cl1.copy(upper).addScaledVector(_cl0, -along);   // perpendicular component
+  _cl2.crossVectors(_cl0, _cl1);                    // its quarter turn
+  // upper.y after rotating by t is A cos t + B sin t + axis.y * along.
+  const A = _cl1.y, B = _cl2.y;
+  const m = maxRise - _cl0.y * along;
+  const R = Math.hypot(A, B);
+  if (R < 1e-9) return;
+  const phase = Math.atan2(B, A);
+  const c = THREE.MathUtils.clamp(m / R, -1, 1);
+  const d = Math.acos(c);
+  // Two solutions; take whichever is the smaller correction.
+  let t = shortAngle(phase + d);
+  const t2 = shortAngle(phase - d);
+  if (Math.abs(t2) < Math.abs(t)) t = t2;
+  const ct = Math.cos(t), st = Math.sin(t);
+  upper.set(
+    _cl0.x * along + _cl1.x * ct + _cl2.x * st,
+    _cl0.y * along + _cl1.y * ct + _cl2.y * st,
+    _cl0.z * along + _cl1.z * ct + _cl2.z * st,
+  ).normalize();
+  lower.copy(target).sub(root).addScaledVector(upper, -l1);
+  if (lower.lengthSq() < 1e-10) lower.copy(upper);
+  lower.normalize();
+}
+
+const _bq = new THREE.Vector3();
+
+/**
+ * Orientation whose bore (+Z) is `pitch` above horizontal and `yaw` to the
+ * left, with `roll` of cant. Positive pitch is muzzle UP, which an euler triple
+ * on this rig is not.
+ */
+function boreQuat(pitch, yaw, roll, out) {
+  const cp = Math.cos(pitch);
+  _bq.set(Math.sin(yaw) * cp, Math.sin(pitch), Math.cos(yaw) * cp);
+  lookQuat(_bq, out);
+  if (roll) {
+    _eu.set(0, 0, roll, 'YXZ');
+    out.multiply(_q3.setFromEuler(_eu));
+  }
+  return out;
 }
 
 const _lx = new THREE.Vector3();
