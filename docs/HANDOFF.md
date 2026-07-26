@@ -357,21 +357,53 @@ any of this. The measured lit/shadow contrast on concrete is 3.2 stops, which is
 physically about right, so this is not an under-lighting bug; see the tone-range
 note below.
 
+### Extra fixes (budget was left over)
+
+**6. Soft print shoulder — `src/render/passes/LUT.js`.** `ART_DIRECTION.md`
+requires a soft highlight rolloff and there was none; the S-curve pushed
+highlights up and `whiteCut` then clipped them. Measured against `refs/`, real
+CoD daylight frames sit at p95 150-225 / p99 197-242 while ours were p95 243-247
+/ p99 246-250 — several percent of every frame pinned flat against the ceiling
+with no separation left in it. Added a Reinhard knee above 0.70 (unit slope at
+the join, ceiling approached asymptotically) to all three active looks and
+dropped `whiteCut` to 0. Across the ten presets: **p95 243 -> 228, p99 246 ->
+233, zero pixels within 5 of white anywhere**, medians up 5-10. Visually the
+sunlit facades now hold tone across the whole surface instead of going to a flat
+cream field.
+
+**7. Vignette 0.34 -> 0.20 — `src/render/PostFX.js`.** The old curve took the
+bottom frame corners down 31%, which on every street-level preset is exactly
+where the shadowed half of the road sits, so it read as a black wedge. Applied
+after metering, so image only. `street` median 38.7 -> 40.4, sub-12 pixels
+7.9% -> 6.9%.
+
+**Non-fix, recorded so nobody repeats it:** raising `asphalt`'s `color` in
+`MaterialDefs.js` does nothing. `Materials.js:241` is
+`mat.color.setHex(has.map ? (def.mapTint ?? 0xffffff) : def.color)` — every
+mapped material ignores `def.color` entirely and takes its albedo from the
+generator (`GROUND.asphalt`, `bitumen = vec3(0.118, 0.113, 0.110)`, which is
+already a correct aged-asphalt reflectance). Change the generator or add a
+`mapTint`, not `color`. The edit was made, measured as a byte-identical render,
+and reverted.
+
 ### Top remaining visual defects, ranked
 
-1. **Our histogram is hotter than the reference frames.** Measured against
-   `refs/` (mw3_03/04/06/07/09): real CoD daylight sits at p95 150-225 and p99
-   197-242. Ours is p95 240-247, p99 245-250. Their frames have far more
-   highlight compression and a higher median. The next move is the tone curve,
-   not the lighting: a real shoulder before the LUT, or a lower `whiteCut` with
-   the S-curve pivot raised. `refs/` plus the scratch histogram tool make this
-   measurable rather than a matter of taste.
-2. **Shadowed asphalt reads very dark and very blue** (12,18,40 sRGB in the
-   `street` foreground). Partly (1); partly that `asphalt`'s albedo in
-   `MaterialDefs.js` is 0x2d2d2f = 0.027 linear, below real aged asphalt
-   (0.07-0.10). Worth raising, but it touches every ground surface so it wants
-   its own pass.
-3. **`establishing` and `goldenhour` are framed into a wall.** The preset camera
+1. **Shadowed asphalt reads dark and very blue** — 12,18,40 sRGB in the `street`
+   foreground, an R:B ratio of 1:3.3. It is *physically* right: a neutral surface
+   lit only by a Rayleigh sky renders that blue, and the measured lit/shadow
+   contrast on concrete is 3.2 stops, which is correct. It is *photographically*
+   wrong, for two reasons, and neither is cheap:
+   - No large-scale bounce. The sunlit west facade should be throwing warm light
+     across the road and nothing models that. `Indirect.js` probes only gather
+     from `lightSpecs` fixtures, not from sunlit static geometry.
+   - The env-map path dominates the sky fill and carries the raw spectral sky.
+     `Indirect._projectSky` desaturates its own copy 34% toward luminance, but at
+     `ambientScale` 0.32 the probe is only a third of the fill; the PMREM supplies
+     the rest at full chroma. Rebalancing (probe up, `Materials.envScale` down)
+     would work but `envMapIntensity` also drives specular, so it would dull the
+     wet-asphalt reflections `night` depends on. Wants a measured pass, not a
+     guess.
+2. **`establishing` and `goldenhour` are framed into a wall.** The preset camera
    at (26, 9.5, 34) sits behind the east block row (x 11.4..26.4, parapet top
    11.4 m at z 9.5..22.5), so it looks at brick, not at the map. That is why
    "three depth planes in `establishing`" cannot be demonstrated in that frame —
@@ -379,9 +411,31 @@ note below.
    `tools/shoot.mjs`, which was out of scope for this pass. **Do this first next
    time** — it is the shot the whole map should be judged on and it is currently
    blind.
-4. **No shadow on the near foreground road in `street`/`ads`/`weapon`.** The
-   camera stands inside the shadow of a 15.5 m block, so the bottom half of the
-   frame is one unbroken dark field. Wave 2 clutter fixes this by construction;
-   until then the frames are bottom-heavy.
-5. Everything in the pre-existing list from item 5 and 6 above (no weapon, no
+3. **No shadow *structure* on the near foreground road in `street`/`ads`/`weapon`.**
+   The camera stands inside the shadow of a 15.5 m block, so the bottom half of
+   the frame is one unbroken dark field — close to the rubric's "the frame is
+   mostly one colour" automatic failure. Wave 2 clutter fixes this by
+   construction; until then the frames are bottom-heavy.
+4. **Highlights still ~5-15 above the reference band on some presets** (p95 228
+   vs the references' 150-225). The shoulder closed most of the gap; the rest is
+   composition — our frames have more sunlit concrete in them than the
+   references, which are character-forward.
+5. Everything in the pre-existing list from items 5 and 6 above (no weapon, no
    bots, still a blockout) is unchanged and still true.
+
+### Tooling note
+
+The three scratch scripts this pass leaned on are not committed (they are
+throwaway and `tools/` was out of scope), but they are trivial to rebuild and
+they are what made "did it actually improve" answerable rather than a matter of
+opinion:
+
+- a **histogram tool** — decodes a PNG in headless Chromium and prints
+  clipped %, crushed %, min/mean luma, mean saturation and p01/p05/p50/p95/p99.
+  Run it on `refs/*.jpg` as well as `shots/*.png`: the reference frames are a
+  calibration target for the tone curve, not just something to look at.
+- a **region probe** — mean sRGB of a named rectangle, for comparing a sunlit
+  facade against a shadowed one across a change.
+- a **sun-bearing calculator** — reimplements `horizonDir()` so a candidate
+  `NORTH_OFFSET` can be checked against every time-of-day anchor before
+  rendering anything.
