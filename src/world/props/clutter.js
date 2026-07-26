@@ -404,7 +404,7 @@ export function wallDrifts(ctx, site, bs, rand, density = 1) {
   const P = POOL;
   let pieces = 0;
   for (const f of site.facades) {
-    if (f.len < 3) continue;
+    if (f.len < 1.6) continue;
     const dx = f.bx - f.ax, dz = f.bz - f.az;
     const len = Math.hypot(dx, dz) || 1;
     const ux = dx / len, uz = dz / len;

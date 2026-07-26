@@ -652,7 +652,7 @@ export function wallDecals(ctx, site, soft, hard, kit, rand, density = 1) {
 
   for (const f of site.facades) {
     const len = Math.hypot(f.bx - f.ax, f.bz - f.az);
-    if (len < 2) continue;
+    if (len < 1.2) continue;
     const ux = (f.bx - f.ax) / len, uz = (f.bz - f.az) / len;
     const h = Math.min(f.top - f.base, 20);
     const at = (t, off) => [f.ax + ux * len * t + f.nx * off, f.az + uz * len * t + f.nz * off];

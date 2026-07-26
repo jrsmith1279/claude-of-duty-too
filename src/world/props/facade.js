@@ -130,7 +130,7 @@ export function facadeDetail(ctx, site, bs, rand, density = 1) {
 
   for (const f of site.facades) {
     const fr = frame(f);
-    if (fr.len < 2.4) continue;
+    if (fr.len < 1.8) continue;
     const h = f.top - f.base;
     if (h < 2.4) continue;
 
