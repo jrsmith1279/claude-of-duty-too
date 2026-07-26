@@ -455,6 +455,8 @@ export class WeaponSystem {
       if (Math.abs(cam.fov - want) > 0.01) { cam.fov = want; cam.updateProjectionMatrix(); }
     }
 
+    this._updateFocus(dt, ctx);
+
     // --- publish -----------------------------------------------------------
     const api = ctx.weapons;
     api.ammo = this.ammo[this.currentId];
@@ -464,6 +466,42 @@ export class WeaponSystem {
     api.reloading = this.reloading;
     api.fireMode = this.def.modes[this.fireModeIdx];
     if (p) p.isADS = api.isADS;
+  }
+
+  /**
+   * Rack the world depth of field onto whatever the shooter is actually
+   * aiming at while aiming.
+   *
+   * PostFX enables its DOF pass whenever `isADS` is true, and its defaults are
+   * authored for the cinematic camera: 8 m focus over a 0.55 range, which
+   * blurs everything past about 12 m into mush. That is wrong for ADS — a real
+   * shooter's eye focuses at the target and the world stays legible; it is the
+   * *weapon* that goes soft, and the viewmodel composite already does that.
+   * Both values are restored on exit so the cinematic look is untouched.
+   */
+  _updateFocus(dt, ctx) {
+    const fx = ctx.postfx;
+    if (!fx?.set) return;
+    const ads = this.view.adsW > 0.02;
+    if (ads) {
+      if (this._dofSaved === undefined) {
+        this._dofSaved = { focus: fx.get('dofFocus'), range: fx.get('dofRange'), radius: fx.get('dofRadius') };
+      }
+      ctx.camera.getWorldPosition(_origin);
+      ctx.camera.getWorldDirection(_dir);
+      const hit = ctx.physics?.raycast?.(_origin, _dir, 220);
+      const want = hit ? clamp(hit.distance, 3, 160) : 70;
+      this._focus = this._focus === undefined ? want : this._focus + (want - this._focus) * (1 - Math.exp(-5 * dt));
+      fx.set('dofFocus', this._focus);
+      fx.set('dofRange', 2.4);
+      fx.set('dofRadius', 4.0);
+    } else if (this._dofSaved !== undefined) {
+      fx.set('dofFocus', this._dofSaved.focus);
+      fx.set('dofRange', this._dofSaved.range);
+      fx.set('dofRadius', this._dofSaved.radius);
+      this._dofSaved = undefined;
+      this._focus = undefined;
+    }
   }
 
   // -------------------------------------------------------------- transforms

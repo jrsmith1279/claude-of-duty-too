@@ -108,7 +108,7 @@ export function buildDeagle(resolve) {
     const p = P('magazine');
     p.add('blued', curvedStack(0.0230, 0.0330, 0.1050, 0.05, 6, { taper: 0.02, r: 0.0045, gap: 0.0006 }), { y: MAG_TOP_Y, z: 0.0380, rx: 0.28 });
     p.add('blued', chamferBox(0.0265, 0.0075, 0.0400, { r: 0.0030, bevel: 0.0012 }), { y: MAG_TOP_Y - 0.1030, z: 0.0670, rx: 0.28 });
-    p.add('brass', cyl(0.0062, 0.0062, 0.0300, 10), { y: MAG_TOP_Y + 0.0060, z: 0.0345, rx: Math.PI / 2 - 0.28 });
+    p.add('brass', cyl(0.0062, 0.0062, 0.0300, 10), { y: MAG_TOP_Y + 0.0060, z: 0.0345 });
     p.group.name = 'magazine';
     p.build();
     root.add(p.group);

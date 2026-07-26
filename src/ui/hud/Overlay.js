@@ -51,16 +51,16 @@ export class Overlay {
     const red = (a) => `rgba(${PAL.chip[0]},${Math.round(PAL.chip[1] * 0.55)},${Math.round(PAL.chip[2] * 0.5)},${a})`;
     let g = this._gRed = this._ctxGrad(cx, cy, r * 0.34, r);
     g.addColorStop(0, red(0));
-    g.addColorStop(0.42, red(0.10));
-    g.addColorStop(0.78, red(0.52));
-    g.addColorStop(1, red(0.95));
+    g.addColorStop(0.46, red(0.07));
+    g.addColorStop(0.80, red(0.38));
+    g.addColorStop(1, red(0.72));
 
     // Fast edge flash — brighter, hotter, and confined to the outer band.
     const hot = (a) => `rgba(255,${58},${44},${a})`;
-    g = this._gEdge = this._ctxGrad(cx, cy, r * 0.62, r);
+    g = this._gEdge = this._ctxGrad(cx, cy, r * 0.66, r);
     g.addColorStop(0, hot(0));
-    g.addColorStop(0.55, hot(0.30));
-    g.addColorStop(1, hot(0.9));
+    g.addColorStop(0.58, hot(0.24));
+    g.addColorStop(1, hot(0.82));
 
     this._gDir = null;      // rebuilt lazily per hit bearing
   }
@@ -103,7 +103,7 @@ export class Overlay {
     const a = s.alpha;
     const w = this.w, h = this.h;
 
-    const slow = Math.max(this.dmg * 0.55, this._low || 0) * a;
+    const slow = Math.max(this.dmg * 0.42, this._low || 0) * a;
     if (slow > 0.004) {
       c.globalAlpha = slow;
       c.fillStyle = this._gRed;
@@ -112,12 +112,12 @@ export class Overlay {
 
     const fast = easeOutCubic(clamp01(this.flash)) * a;
     if (fast > 0.004) {
-      c.globalAlpha = fast * 0.62;
+      c.globalAlpha = fast * 0.46;
       c.fillStyle = this._gEdge;
       c.fillRect(0, 0, w, h);
       // Directional bias: the quadrant the shot came from gets a hotter smear,
       // so the vignette itself carries some of the information the arcs do.
-      this._directional(c, fast * 0.85);
+      this._directional(c, fast * 0.52);
     }
 
     if (this.white > 0.004) {
@@ -148,8 +148,8 @@ export class Overlay {
     const reach = Math.hypot(cx, cy);
     const g = c.createLinearGradient(cx - dx * reach * 0.15, cy - dy * reach * 0.15, cx + dx * reach, cy + dy * reach);
     g.addColorStop(0, 'rgba(255,54,40,0)');
-    g.addColorStop(0.55, 'rgba(255,54,40,0.20)');
-    g.addColorStop(1, 'rgba(255,60,44,0.62)');
+    g.addColorStop(0.60, 'rgba(255,54,40,0.14)');
+    g.addColorStop(1, 'rgba(255,60,44,0.52)');
     c.globalAlpha = amount;
     c.fillStyle = g;
     c.fillRect(0, 0, w, h);

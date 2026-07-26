@@ -3,6 +3,8 @@ import { makeRng } from './props/lib.js';
 import { Site, BatchSet } from './props/layout.js';
 import { scatterGround, rubblePiles, wallDrifts, wallBerms } from './props/clutter.js';
 import { DecalKit, groundDecals, wallDecals, tyreTracks } from './props/decals.js';
+import { facadeDetail } from './props/facade.js';
+import { overheadLines, awnings, rooftops, fireEscape } from './props/overhead.js';
 
 /**
  * Everything in the world that is not the building shell.
@@ -101,6 +103,13 @@ export class PropSystem {
     const decals = new BatchSet('decal', Infinity, false);
 
     let pieces = 0;
+    // Structure before scatter: the facade and roof passes claim their ground
+    // with site.occupy(), and the clutter fields respect it.
+    pieces += facadeDetail(ctx, site, core, rand, 1).parts;
+    pieces += rooftops(ctx, site, core, rand, 1).parts;
+    pieces += awnings(ctx, site, core, rand, 1).parts;
+    pieces += overheadLines(ctx, site, core, rand, 1).parts;
+    pieces += fireEscape(ctx, site, core, rand).parts;
     pieces += rubblePiles(ctx, site, core, rand, 1).pieces;
     pieces += wallDrifts(ctx, site, detail, rand, 1).pieces;
     pieces += wallBerms(ctx, site, core, rand, 1).pieces;

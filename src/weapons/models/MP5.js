@@ -141,7 +141,7 @@ export function buildMP5(resolve) {
     p.add('black', curvedStack(0.0270, 0.0255, 0.1900, 0.30, 9, { taper: 0.04, r: 0.0055, gap: 0.0007 }), { y: MAG_TOP_Y, z: -0.0480 });
     p.add('black', chamferBox(0.0310, 0.0100, 0.0300, { r: 0.0035, bevel: 0.0013 }), { y: MAG_TOP_Y - 0.1930, z: -0.0200, rx: 0.30 });
     p.add('black', chamferBox(0.0295, 0.0120, 0.0280, { r: 0.0035, bevel: 0.0012 }), { y: MAG_TOP_Y - 0.0070, z: -0.0480 });
-    p.add('brass', cyl(0.0046, 0.0046, 0.0250, 10), { y: MAG_TOP_Y + 0.0050, z: -0.0480, rx: Math.PI / 2 });
+    p.add('brass', cyl(0.0046, 0.0046, 0.0250, 10), { y: MAG_TOP_Y + 0.0050, z: -0.0480 });
     p.group.name = 'magazine';
     p.build();
     root.add(p.group);

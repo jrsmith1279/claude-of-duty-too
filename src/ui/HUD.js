@@ -339,12 +339,19 @@ export class HUDSystem {
     if (!cur && this._demoWeapon) cur = this._demoWeapon;
     s.hasWeapon = !!cur;
     if (cur) {
-      s.weaponName = cur.displayName || cur.name || cur.id || '';
-      s.fireMode = w?.fireMode || cur.fireMode || cur.mode || '';
-      const ammo = w?.ammo || cur.ammo || null;
-      s.mag = ammo?.mag ?? cur.mag ?? 0;
-      s.reserve = ammo?.reserve ?? cur.reserve ?? 0;
-      s.magSize = ammo?.magSize ?? cur.magSize ?? cur.def?.mag ?? cur.magazine ?? Math.max(s.mag, 1);
+      // `current` came back as a bare id string rather than an object, so
+      // resolve both shapes: the definition is on `ctx.weapons.def` in that
+      // case, and on the weapon itself in the other.
+      const isId = typeof cur === 'string';
+      const def = (isId ? w?.def : (cur.def || cur)) || null;
+      const id = isId ? cur : (cur.id ?? def?.id ?? '');
+      s.weaponName = def?.displayName || def?.name || def?.label || String(id).toUpperCase();
+      s.fireMode = w?.fireMode || def?.fireMode || def?.mode || '';
+      const obj = isId ? null : cur;
+      const ammo = w?.ammo || obj?.ammo || null;
+      s.mag = ammo?.mag ?? obj?.mag ?? 0;
+      s.reserve = ammo?.reserve ?? obj?.reserve ?? 0;
+      s.magSize = ammo?.magSize ?? def?.mag ?? def?.magSize ?? Math.max(s.mag, 1);
     }
     s.ads = clamp01(w?.adsProgress ?? p?.adsProgress ?? (w?.isADS || p?.isADS ? 1 : 0));
     s.spreadPx = this._spreadPx(ctx, dt);

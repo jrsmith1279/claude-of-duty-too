@@ -211,7 +211,7 @@ export function buildM4(resolve) {
     // Witness holes down the right flank.
     for (let i = 0; i < 4; i++) p.addMirrored('black', cyl(0.0022, 0.0022, 0.0035, 8), { x: 0.0126, y: MAG_TOP_Y - 0.055 - i * 0.030, z: -0.0125 + i * 0.0032, ry: Math.PI / 2 });
     // A brass round visible at the feed lips.
-    p.add('brass', cyl(0.0028, 0.0028, 0.0230, 10), { y: MAG_TOP_Y + 0.0055, z: -0.0125, rx: Math.PI / 2 });
+    p.add('brass', cyl(0.0028, 0.0028, 0.0230, 10), { y: MAG_TOP_Y + 0.0055, z: -0.0125 });
     p.group.name = 'magazine';
     p.build();
     root.add(p.group);

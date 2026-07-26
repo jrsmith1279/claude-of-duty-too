@@ -20,28 +20,36 @@ import { deg } from './Springs.js';
  * how you get brighter ones — multiplying by a colour can only darken.
  */
 export const GUN_MATERIALS = {
-  // Anodised aluminium receiver / rails: near black, semi-matte.
-  black: ['gun_metal', { uvScale: 8, roughness: 0.40 }],
-  // Phosphated steel: barrel, gas block, small parts. Slightly warmer, rougher.
-  park: ['gun_metal', { uvScale: 9, roughness: 0.55, color: 0xd8d2c8 }],
+  // Anodised aluminium receiver / rails. The defaults that ship with
+  // `gun_metal` (roughness 0.25, F0 straight off a 0.15 albedo, env 1.3) turn
+  // the weapon into a blurred mirror of the sky: measured against the street,
+  // the top faces clipped to white while the flanks read pale blue. A real
+  // hard-anodised or phosphated finish is *dark and broad* — the oxide layer
+  // scatters — so F0 comes down by half and roughness goes up to 0.60, which
+  // is what puts the highlight along the chamfers instead of across the slab.
+  black: ['gun_metal', { uvScale: 8, roughness: 0.60, color: 0x83878e, envMapIntensity: 0.60 }],
+  // Phosphated steel: barrel, gas block, small parts. Warmer, rougher still.
+  park: ['gun_metal', { uvScale: 9, roughness: 0.70, color: 0x8b867d, envMapIntensity: 0.52 }],
   // Bright machined steel: bolt carrier, charging handle, pins, screws.
-  steel: ['steel_brushed', { uvScale: 6, roughness: 0.26 }],
-  // Blued/oiled steel: slides, hammers.
-  blued: ['gun_metal', { uvScale: 10, roughness: 0.17, color: 0xb9c0cc }],
+  steel: ['steel_brushed', { uvScale: 6, roughness: 0.36, color: 0xa9aeb5, envMapIntensity: 0.75 }],
+  // Blued/oiled steel: slides, hammers. Smoother than parkerising and darker.
+  blued: ['gun_metal', { uvScale: 10, roughness: 0.30, color: 0x767c88, envMapIntensity: 0.80 }],
   // Injection-moulded furniture.
-  polymer: ['gun_polymer', { uvScale: 7, roughness: 0.58, color: 0xcfd0d2 }],
-  polymer_fde: ['gun_polymer', { uvScale: 7, roughness: 0.62, color: 0xd8b184 }],
+  polymer: ['gun_polymer', { uvScale: 7, roughness: 0.64, color: 0x9a9da2, envMapIntensity: 0.55 }],
+  polymer_fde: ['gun_polymer', { uvScale: 7, roughness: 0.68, color: 0xa88a63, envMapIntensity: 0.55 }],
   // Rubberised butt pad and grip inserts.
-  rubber: ['rubber', { uvScale: 4 }],
+  rubber: ['rubber', { uvScale: 4, envMapIntensity: 0.5 }],
   // Optic glass: not transmissive — the aperture is genuinely open geometry, so
   // this only ever covers the lens rim where the coating flares.
-  lens: ['steel_brushed', { uvScale: 3, roughness: 0.045, metalness: 1, color: 0x5f86b8, envMapIntensity: 2.6 }],
+  lens: ['steel_brushed', { uvScale: 3, roughness: 0.05, metalness: 1, color: 0x4f7cb4, envMapIntensity: 1.8 }],
   // The red dot itself. Emissive lands in the HDR viewmodel buffer before
-  // bloom, so it flares the way a real illuminated reticle does.
-  dot: ['gun_polymer', { color: 0x000000, roughness: 1, emissive: 0xff2a12, emissiveIntensity: 26 }],
-  tritium: ['gun_polymer', { color: 0x02120a, roughness: 0.9, emissive: 0x39ff9a, emissiveIntensity: 3.2 }],
-  wood: ['gun_wood', { uvScale: 5 }],
-  brass: ['gun_metal', { uvScale: 12, roughness: 0.22, color: 0xffcf7a, metalness: 1 }],
+  // bloom, so it flares the way a real illuminated reticle does. The scale is
+  // set against a sunlit street metering at ~2 units, so it has to be an order
+  // of magnitude over that to survive auto-exposure.
+  dot: ['gun_polymer', { color: 0x000000, roughness: 1, envMapIntensity: 0, emissive: 0xff2814, emissiveIntensity: 70 }],
+  tritium: ['gun_polymer', { color: 0x02120a, roughness: 0.9, envMapIntensity: 0, emissive: 0x39ff9a, emissiveIntensity: 6 }],
+  wood: ['gun_wood', { uvScale: 5, envMapIntensity: 0.6 }],
+  brass: ['gun_metal', { uvScale: 12, roughness: 0.34, color: 0xc79a4c, metalness: 1, envMapIntensity: 0.7 }],
   // Nomex glove — dark, matte, sheened fabric. Deliberately not skin.
   glove: ['fabric_canvas', { uvScale: 5, roughness: 0.88, color: 0x33362f }],
   glove_pad: ['rubber', { uvScale: 6, color: 0x8d9088 }],
@@ -180,7 +188,7 @@ const RELOAD_PISTOL = {
  * eye-relief distance is a number here.
  */
 const POSE_RIFLE = {
-  hip: { pos: [0.126, -0.137, -0.315], rot: [1.0, -5.6, 2.6] },
+  hip: { pos: [0.132, -0.112, -0.315], rot: [1.0, -5.6, 2.6] },
   // 0.30 m is long for a red dot in real life, but it is deliberate: the
   // viewmodel composite focuses its little depth-of-field at 0.32 m, so
   // putting the sight there keeps the reticle razor sharp while the muzzle and
@@ -263,7 +271,7 @@ export const WEAPONS = {
     shell: { size: 0.0064, len: 0.033, speed: 3.0 },
     reload: RELOAD_PISTOL,
     pose: {
-      hip: { pos: [0.115, -0.148, -0.285], rot: [2.0, -7.5, 3.0] },
+      hip: { pos: [0.120, -0.124, -0.285], rot: [2.0, -7.5, 3.0] },
       adsEyeRelief: 0.305,
       sprint: { pos: [0.088, -0.172, -0.245], rot: [-8.0, 30.0, -36.0] },
       lowReady: { pos: [0.112, -0.196, -0.270], rot: [-26.0, -9.0, 3.0] },

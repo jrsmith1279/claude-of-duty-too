@@ -203,7 +203,10 @@ export class BotAnimator {
     const crouch = this.crouchBlend.step(s.crouch || 0, dt);
     const aim = this.aimBlend.step(s.aiming || 0, dt);
 
-    this._stepFeet(s, dt, crouch);
+    // `frozen` holds the feet exactly where they are while everything above
+    // them keeps solving — the screenshot harness needs a bot posed mid-stride
+    // that does not walk out of frame between the pose and the shutter.
+    if (!this.frozen) this._stepFeet(s, dt, crouch);
     this._solveBody(s, dt, crouch, aim);
     this._solveLegs(s, crouch);
     this._solveUpper(s, dt, crouch, aim);
@@ -665,7 +668,7 @@ const _ikq = new THREE.Quaternion();
  * into `outUpper` / `outLower`. Out-of-reach targets straighten the limb rather
  * than failing, which is both stable and what a real limb does.
  */
-function solveTwoBone(root, target, l1, l2, pole, outUpper, outLower) {
+export function solveTwoBone(root, target, l1, l2, pole, outUpper, outLower) {
   _ik0.copy(target).sub(root);
   let len = _ik0.length();
   if (len < 1e-5) { _ik0.set(0, -1, 0); len = 1; }

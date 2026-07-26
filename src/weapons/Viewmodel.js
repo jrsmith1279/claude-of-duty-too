@@ -351,7 +351,7 @@ export class Viewmodel {
     root.quaternion.copy(_qa).multiply(_qb);
 
     this._animateParts(dt);
-    this._updateLights();
+    this._updateLights(dt);
     return stageFired;
   }
 
@@ -431,13 +431,30 @@ export class Viewmodel {
    * same sun the street is, and rotate the environment probe with the camera
    * so its reflections track where the player is actually looking.
    */
-  _updateLights() {
+  _updateLights(dt) {
     const ctx = this.ctx;
     const cam = ctx.camera;
     const sky = ctx.sky;
     const sun = ctx.lighting?.sun;
     if (!cam) return;
     _q.copy(cam.quaternion).invert();
+
+    // Is the shooter actually standing in the sun? The world casts shadows on
+    // itself, but the viewmodel scene has no shadow map of its own, so without
+    // this one raycast the weapon is lit as if in full sun while the player
+    // stands in the shade of a fifteen-metre block — which is precisely how
+    // the first pass of this viewmodel read as pasted on.
+    if (sky?.sunDirection && ctx.physics?.raycast) {
+      this._shadowT = (this._shadowT || 0) + dt;
+      if (this._shadowT > 0.1) {
+        this._shadowT = 0;
+        cam.getWorldPosition(_v2);
+        _v.copy(sky.sunDirection).normalize();
+        if (_v.y < 0) _v.negate();
+        this._sunTarget = ctx.physics.raycast(_v2, _v, 90) ? 0.05 : 1;
+      }
+    }
+    this._sunVis = approach(this._sunVis ?? 1, this._sunTarget ?? 1, 7, dt);
 
     if (sky?.sunDirection) {
       _v.copy(sky.sunDirection).applyQuaternion(_q).normalize();
@@ -451,7 +468,7 @@ export class Viewmodel {
     // legible even when you cannot say why.
     if (sun) {
       this.key.color.copy(sun.color);
-      this.key.intensity = sun.intensity;
+      this.key.intensity = sun.intensity * this._sunVis;
     }
     if (sky?.skyColor) {
       const c = this.fill.color.copy(sky.skyColor);
@@ -467,7 +484,10 @@ export class Viewmodel {
     if (env) {
       _e.setFromQuaternion(_q, 'XYZ');
       vs.environmentRotation.set(_e.x, _e.y, _e.z, 'XYZ');
-      vs.environmentIntensity = 1.0;
+      // Below 1.0 deliberately: the weapon is held against the shooter's body,
+      // so roughly a third of its sky hemisphere is occluded by a torso the
+      // viewmodel scene does not contain and cannot shadow.
+      vs.environmentIntensity = 0.62;
     }
   }
 

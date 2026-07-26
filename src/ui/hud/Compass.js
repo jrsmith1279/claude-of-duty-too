@@ -139,7 +139,7 @@ export class Compass {
       const off = (d - heading) * pxPerDeg;
       const fade = 1 - Math.pow(Math.abs(off) / halfW, 2.2);
       if (fade <= 0.02) continue;
-      this._tick(c, cx + off, y + 15 * k, 2.2 * k, k, 0.24 * fade * a);
+      this._tick(c, cx + off, y + 15 * k, 2.2 * k, k, 0.32 * fade * a);
     }
 
     // Ticks every 15 degrees across the visible window.
@@ -162,9 +162,9 @@ export class Compass {
         c.fillText(label, x, y + 10 * k);
         clearTracking(c);
         noShadow(c);
-        this._tick(c, x, y + 15 * k, 5.5 * k, k, 0.62 * fade * a);
+        this._tick(c, x, y + 15 * k, 5.5 * k, k, 0.72 * fade * a);
       } else {
-        this._tick(c, x, y + 15 * k, 3.5 * k, k, 0.42 * fade * a);
+        this._tick(c, x, y + 15 * k, 3.5 * k, k, 0.52 * fade * a);
       }
     }
 
