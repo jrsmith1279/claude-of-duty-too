@@ -7,8 +7,13 @@
 export const GROUND = {
   asphalt: {
     world: 4.0,
-    bump: 1.0,
-    cavity: 0.75,
+    // Relief cut from 1.0 / 0.75. At 74 mm aggregate cells the old amplitude
+    // made every stone a separately lit pebble at 3 m and the carriageway read
+    // as a loose gravel bed rather than as bitumen with aggregate in it. Real
+    // asphalt is a nearly flat surface whose stones are *visible* but not
+    // *proud*. MATERIAL_DEFS carries the matching normalScale/pom cut.
+    bump: 0.62,
+    cavity: 0.55,
     glsl: /* glsl */ `
 /** Shared hot-rolled asphalt base. wear 0 = freshly laid, 1 = ravelled and cracked. */
 Surf asphaltBase(vec2 uv, float wear, float sd){
@@ -23,13 +28,20 @@ Surf asphaltBase(vec2 uv, float wear, float sd){
   float mid   = 1.0 - smoothstep(0.14, 0.38, a2.f1);
   float small = 1.0 - smoothstep(0.12, 0.34, a3.f1);
 
-  float exposed = mix(0.55, 1.0, wear);   // bitumen film wears off the stone tops
+  // Binder exposure. A road is bitumen with stone IN it, not stone with bitumen
+  // between: even a ravelled surface keeps a film over most of the aggregate.
+  float exposed = mix(0.42, 0.82, wear);
   float stoneMask = sat(big * 0.9 + mid * 0.5 + small * 0.25);
 
-  vec3 bitumen = vec3(0.118, 0.113, 0.110);
-  vec3 stoneA  = vec3(0.395, 0.382, 0.365);
-  vec3 stoneB  = vec3(0.255, 0.243, 0.235);
-  vec3 stoneC  = vec3(0.510, 0.470, 0.415);   // occasional limestone / flint
+  // Measured against bo6_05's dry carriageway, which sits around sRGB #4b4b4d.
+  // The old palette put a near-black matrix under high-contrast pale stones, so
+  // the mean came out far too dark AND the per-stone contrast far too high —
+  // the two failures that together make it read as gravel. Lifting the matrix
+  // and pulling the stones down fixes both without touching the noise fields.
+  vec3 bitumen = vec3(0.155, 0.150, 0.148);
+  vec3 stoneA  = vec3(0.335, 0.325, 0.312);
+  vec3 stoneB  = vec3(0.240, 0.232, 0.226);
+  vec3 stoneC  = vec3(0.420, 0.392, 0.352);   // occasional limestone / flint
   vec3 stone = mix(stoneA, stoneB, fract(a1.id * 37.1));
   stone = mix(stone, stoneC, step(0.86, fract(a1.id * 91.3)));
   stone *= mix(0.68, 1.32, fract(a1.id * 77.3));
@@ -58,25 +70,30 @@ Surf asphaltBase(vec2 uv, float wear, float sd){
   base = mix(base, bitumen * 0.8, socket * 0.7);
 
   // --- tar-seam repairs: a wandering ribbon of smooth black binder
+  //
+  // THE GOVERNING RULE FOR THIS FILE: any feature whose real-world period
+  // exceeds the tile must be a decal, not a term in the tile. On a 4 m tile a
+  // seam term repeats every 4 m; two of them, one per axis, drew a 4 m grid
+  // across the whole carriageway and read as wallpaper the moment more than
+  // one tile was in frame. The cross-axis seam is gone outright and what is
+  // left is a 30% hint that survives as texture rather than as a line — the
+  // real, single, full-length seams are placed as world-scale decals by
+  // props/decals.js, which is the only place that knows where the road edges
+  // actually are.
   float seamPath = fbm(vec2(uv.y * 3.0, 0.5), vec2(3.0, 1.0), 4, 2.0, 0.5) * 0.16;
   float seamD = abs(fract(uv.x + seamPath + 0.31) - 0.5);
   float seam = 1.0 - smoothstep(0.012, 0.028, seamD);
-  float seamPath2 = fbm(vec2(uv.x * 4.0, 3.5), vec2(4.0, 1.0), 4, 2.0, 0.5) * 0.13;
-  float seamD2 = abs(fract(uv.y + seamPath2 + 0.72) - 0.5);
-  seam = max(seam, (1.0 - smoothstep(0.010, 0.024, seamD2)) * 0.85);
-  seam *= 0.35 + 0.65 * wear;
+  seam *= (0.35 + 0.65 * wear) * 0.30;
   base = mix(base, vec3(0.088, 0.084, 0.084), seam);
   s.rough = mix(s.rough, 0.42, seam * 0.85);
   s.h = mix(s.h, 0.62, seam * 0.6);
   s.ao = mix(s.ao, 1.0, seam * 0.5);
 
-  // --- polished wheel paths: two lanes of compacted, lighter, smoother surface
-  float lane = exp(-sq((fract(uv.x + 0.18) - 0.5) / 0.16)) + exp(-sq((fract(uv.x + 0.68) - 0.5) / 0.16));
-  lane *= smoothstep(0.2, 0.7, fbm01(uv * vec2(2.0, 5.0) + 9.0, vec2(2.0, 5.0), 3, 2.0, 0.55));
-  lane = sat(lane) * (0.5 + 0.5 * wear);
-  base = mix(base, base * 1.55 + 0.035, lane * 0.55);
-  s.rough = mix(s.rough, 0.38, lane * 0.55);
-  s.h -= lane * big * 0.06;
+  // NO WHEEL PATHS HERE. There used to be two polished lanes per tile, which on
+  // a 4 m tile is one every 2 m: seven of them across a 14 m carriageway, all
+  // parallel, all identical, and the single loudest tiling tell in the frame.
+  // A wheel path is a ~3.5 m-gauge pair aligned to the DRIVING LINE, which the
+  // texture cannot know about. props/decals.js lays them at world scale.
 
   // --- oil staining under where vehicles stand
   float oil = blobs(uv, vec2(6.0), 0.14, 0.30, 0.5, sd + 15.0);
@@ -103,8 +120,10 @@ Surf gen_asphalt(vec2 uv){
 
   asphalt_worn: {
     world: 4.0,
-    bump: 1.25,
-    cavity: 0.85,
+    // Cut in the same proportion as `asphalt`. The cracking and the potholes
+    // are what should carry the relief here, not the aggregate.
+    bump: 0.78,
+    cavity: 0.62,
     deps: ['asphalt'],
     glsl: /* glsl */ `
 Surf gen_asphalt_worn(vec2 uv){
@@ -136,22 +155,13 @@ Surf gen_asphalt_worn(vec2 uv){
   s.ao *= 1.0 - ph * 0.55;
   s.rough = mix(s.rough, 0.93, ph * 0.9);
 
-  // --- rectangular utility patches, laid later and a different shade
-  vec2 pp = uv * 3.0;
-  vec2 pi = floor(pp), pf = fract(pp);
-  vec3 pr = hash32(pi + sd);
-  float repairArea = step(0.72, pr.x) *
-                smoothstep(0.02, 0.07, min(pf.x, 1.0 - pf.x) - (pr.y - 0.5) * 0.08) *
-                smoothstep(0.02, 0.07, min(pf.y, 1.0 - pf.y) - (pr.z - 0.5) * 0.08);
-  s.alb = mix(s.alb, s.alb * 0.62 + vec3(0.012), repairArea * 0.75);
-  s.rough = mix(s.rough, 0.60, repairArea * 0.6);
-  float repairEdge = step(0.72, pr.x) * (1.0 - smoothstep(0.0, 0.012, abs(min(pf.x, 1.0 - pf.x) - 0.03)));
-  s.h -= repairEdge * 0.12;
-
-  // --- ghost of a worn-out road marking
-  float ghost = (1.0 - smoothstep(0.03, 0.05, abs(fract(uv.y * 2.0 + 0.4) - 0.5))) *
-                smoothstep(0.35, 0.8, fbm01(uv * 20.0 + 44.0, vec2(20.0), 4, 2.0, 0.5));
-  s.alb = mix(s.alb, vec3(0.42, 0.41, 0.38), ghost * 0.25);
+  // NO UTILITY PATCHES HERE, and no ghost lane marking either. Both were laid
+  // on a sub-tile grid — the patches at uv*3.0, i.e. one every 1.33 m, and the
+  // marking at uv.y*2.0, i.e. one every 2 m. A utility patch is a one-off
+  // event with a straight sawcut edge and a dark perimeter seam; the reference
+  // frames have exactly ONE in shot. Repeating it eight times per tile is not
+  // a weaker version of the same thing, it is a different and obviously
+  // synthetic thing. props/decals.js places both at world scale.
 
   applyMacro(s, uv, 0.22, 0.07, sd);
   s.alb *= uTint;
