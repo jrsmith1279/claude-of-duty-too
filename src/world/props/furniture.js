@@ -119,9 +119,13 @@ export function burntCar(bs, rand, x, y, z, yaw, colliders) {
   const g = geo();
   const fire = rand() < 0.5 ? 1 : -1;
   const sootAt = (t) => {
-    // t: 0 at the tail, 1 at the nose (the fire usually started in the engine)
-    const k = 0.34 + 0.5 * (1 - t) + rand() * 0.14;
-    _c.setRGB(k * 1.06, k * 0.99, k * 0.94);
+    // t: 0 at the tail, 1 at the nose (the fire usually started in the engine).
+    // The floor matters: at the first pass the nose panels bottomed out near
+    // 0.34 and the whole vehicle read as one black slab against a hazed street
+    // instead of as a shape with panels in it. Burnt steel is dark, but it is
+    // dark *and* still catches a specular edge on every crease.
+    const k = 0.52 + 0.44 * (1 - t) + rand() * 0.16;
+    _c.setRGB(k * 1.05, k * 0.99, k * 0.95);
     return _c;
   };
   const put = (key, gm, ox, oy, oz, rx, ry, rz, sx, sy, sz, col, shadow = true) => {
