@@ -31,6 +31,13 @@ const RIFLE = {
 // firefight; the audio system already has six distinct gun signatures.
 const TEAM_GUN = { a: 'm4', b: 'ak74' };
 
+/**
+ * How far the torso may twist away from the feet before the body has to turn.
+ * Kept comfortably inside the animator's own +/-1.25 rad aim clamp so the clamp
+ * is a backstop rather than the thing the pose runs into.
+ */
+export const MAX_TWIST = 1.10;
+
 const _v0 = new THREE.Vector3();
 const _v1 = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -77,20 +84,22 @@ export class Bot {
     this.pivot.add(rig.root);
     this.pivot.matrixAutoUpdate = true;
 
-    this.meshes = [];
-    for (const [key, g] of [['body', geo.body], ['gear', geo.gear]]) {
-      const mesh = new THREE.SkinnedMesh(g, ai.materials[key]);
-      mesh.name = `bot${index}_${key}`;
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      // Bind in the mesh's own (identity) space: the bones carry the world
-      // transform, the mesh must not.
-      mesh.bind(rig.skeleton, new THREE.Matrix4());
-      mesh.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1.65);
-      mesh.visible = false;
-      this.meshes.push(mesh);
-    }
-    this.body = this.meshes[0];
+    // ONE skinned mesh. Everything a bot is made of samples one packed kit
+    // atlas, so the two halves that used to cost two colour draws and two draws
+    // per shadow cascade are now one of each. `meshes` stays an array because a
+    // bot may still legitimately grow a second mesh (a dropped weapon, a
+    // detached helmet) and every consumer already iterates it.
+    const mesh = new THREE.SkinnedMesh(geo.kit, ai.botMaterial(index));
+    mesh.name = `bot${index}`;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    // Bind in the mesh's own (identity) space: the bones carry the world
+    // transform, the mesh must not.
+    mesh.bind(rig.skeleton, new THREE.Matrix4());
+    mesh.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1.65);
+    mesh.visible = false;
+    this.meshes = [mesh];
+    this.body = mesh;
 
     this.anim = new BotAnimator(rig.byName);
     this.sense = new Perception(this);
@@ -133,6 +142,7 @@ export class Bot {
     this.speed = 0;
     this.crouch = 0;
     this.aiming = 0;
+    this.carry = null;
     this.wantFire = false;
     this.suppressing = false;
     this.inCover = false;
@@ -452,6 +462,15 @@ export class Bot {
     const rate = (engaged ? 5.5 : 3.4) * (0.35 + Math.min(Math.abs(err), 1.6));
     const step = THREE.MathUtils.clamp(err, -rate * dt, rate * dt);
     this.yaw += step;
+
+    // The upper body may twist MAX_TWIST toward the aim and no further. Past
+    // that the animator's own clamp saturates, the weapon-bone target lands
+    // behind the chest, and the arm solver reaches past it and splays into a
+    // T-pose — which is exactly what the far bot in `combat` was doing. A
+    // soldier turns his feet; he does not twist his neck 180 degrees. So the
+    // excess goes into the body yaw instead, every frame, unconditionally.
+    const rel = shortAngle(this.aimYaw - this.yaw);
+    if (Math.abs(rel) > MAX_TWIST) this.yaw += rel - Math.sign(rel) * MAX_TWIST;
   }
 
   _animate(dt, ctx) {
@@ -459,7 +478,7 @@ export class Bot {
     _v0.copy(this.velocity).setY(0);
     this._animState = this._animState || {
       pos: this.position, velocity: _v0, yaw: 0, speed: 0, crouch: 0, aiming: 0,
-      aimPoint: this.aimPoint, aimYaw: 0, dt: 0,
+      aimPoint: this.aimPoint, aimYaw: 0, dt: 0, carry: null,
       groundAt: (x, z, fallback) => this._groundAt(x, z, fallback, ctx),
       onFootDown: (foot, speed) => this._footstep(foot, speed, ctx),
     };
@@ -470,6 +489,7 @@ export class Bot {
     s.crouch = this.crouch;
     s.aiming = this.aiming > 0.5 ? 1 : 0;
     s.aimYaw = this.aimYaw;
+    s.carry = this.carry;
     s.dt = dt;
     s.ctx = ctx;
     a.update(s);
@@ -488,12 +508,14 @@ export class Bot {
     for (const m of this.meshes) {
       m.boundingSphere.center.set(this.position.x, this.position.y + 0.95, this.position.z);
     }
-    // A bot two blocks away contributes a few pixels of shadow and costs two
-    // draws in every cascade it touches. Past 34 m it stops casting.
+    // A bot two blocks away contributes a few pixels of shadow and costs one
+    // draw in every cascade it touches. Past 22 m it stops casting: a cast
+    // shadow at 30 m through this much haze is a handful of pixels, and the
+    // cutoff is what caps the worst case as the bot count rises.
     const cam = ctx?.camera;
     if (cam) {
       const dx = cam.position.x - this.position.x, dz = cam.position.z - this.position.z;
-      const near = dx * dx + dz * dz < 34 * 34;
+      const near = dx * dx + dz * dz < 22 * 22;
       if (near !== this._castShadow) {
         this._castShadow = near;
         for (const m of this.meshes) m.castShadow = near;

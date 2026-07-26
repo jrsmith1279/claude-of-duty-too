@@ -1,22 +1,23 @@
 import * as THREE from 'three';
+import { KIT, tileRect, pingpong } from './BotKitAtlas.js';
 
 /**
  * Procedural soldier: skeleton, skinned geometry, hitbox volumes.
  *
  * Deliberate scope call (see `docs/ART_DIRECTION.md`): we do not attempt
  * photoreal humans. What a bot has to do is read as a *soldier silhouette* at
- * 10-30 m against a bright street and move correctly. So the effort goes into
- * proportion, gear read (helmet dome, plate carrier bulk, magazine pouches,
- * boot mass) and the skeleton that drives it — not into skin, faces or cloth.
- * The face is a balaclava and goggles: no skin shader, and it is what the
- * reference frames actually show anyway.
+ * 10-40 m against a bright street and move correctly. So the effort goes into
+ * proportion, gear read and the skeleton that drives it — not into skin, faces
+ * or cloth. The face is a void behind an eye-pro band: no skin shader, no
+ * features, and that is what the reference frames actually show at this range.
  *
- * Two geometries per bot, not fourteen meshes: everything soft is one skinned
- * mesh on the cloth material, everything hard (helmet, plates, boots, weapon)
- * is a second one on the gun material. Both geometries are built ONCE at
- * startup and shared by every bot — each bot only owns its own `THREE.Skeleton`.
- * That is 2 draw calls per visible bot, and the cascaded shadow map only sees a
- * bot in the one or two cascades its depth slice touches.
+ * ONE geometry, not two. Everything — cloth, plate carrier, helmet, boots and
+ * the carbine — samples one packed `bot_kit` atlas, so a bot is a single
+ * SkinnedMesh: one colour draw and one draw per shadow cascade it touches,
+ * instead of two of each. That halving is the whole reason the material merge
+ * was worth doing, and it is why every `b.add()` below names an atlas tile.
+ * The geometry is built ONCE at startup and shared by every bot — each bot only
+ * owns its own `THREE.Skeleton` and its own tinted material instance.
  *
  * Everything is authored in metres at a 1.80 m eye-to-heel scale, with joint
  * heights taken from standard anthropometry (hip 0.94, knee 0.50, shoulder
@@ -107,6 +108,49 @@ export const SIGHT = new THREE.Vector3(0, 0.128, 0.090);
 
 // --------------------------------------------------------------------- build
 
+// Dust, in linear space, normalised to unit luminance so mixing toward it is a
+// hue shift and not a second darkening on top of the gravity ramp.
+const WARM = new THREE.Color(1.22, 0.95, 0.61);
+
+/**
+ * Dirt gravity. Kit is clean at the shoulder and filthy at the boot, and the
+ * ramp between the two does more for "this is a person who has been outside"
+ * than any texture at this range. Values are the measured reference profile.
+ */
+function gravity(y) {
+  if (y >= 1.46) return 1.00;
+  if (y >= 0.94) return 0.86 + 0.14 * ((y - 0.94) / 0.52);
+  if (y >= 0.50) return 0.74 + 0.12 * ((y - 0.50) / 0.44);
+  if (y >= 0.20) return 0.68 + 0.06 * ((y - 0.20) / 0.30);
+  return 0.68;
+}
+
+/**
+ * Baked contact occlusion, in bot-local rest space.
+ *
+ * This is what stops the kit reading as one flat cutout at 28 m: it is free, it
+ * survives any lighting, and it is the only occlusion a skinned mesh gets —
+ * SSAO cannot see into an armpit that is 4 px wide.
+ */
+function bakedAO(x, y, z) {
+  let ao = 1;
+  const ax = Math.abs(x);
+  // Under the boot: the sole is never lit.
+  if (y < 0.075) ao = Math.min(ao, 0.72 + 0.28 * (y / 0.075));
+  // The lower edge of the plate carrier, front and back.
+  if (y > 1.02 && y < 1.14 && Math.abs(z) > 0.06) {
+    ao = Math.min(ao, 0.80 + 0.20 * Math.abs(y - 1.08) / 0.06);
+  }
+  // Armpit.
+  if (ax > 0.11 && ax < 0.25 && y > 1.30 && y < 1.47) ao = Math.min(ao, 0.78);
+  // Inside the helmet line and under the brim: the whole reason the face reads
+  // as a void rather than as a pale disc.
+  if (y > 1.560 && y < 1.672 && z > -0.05) ao = Math.min(ao, 0.78);
+  // Under the mag shingle.
+  if (y > 1.00 && y < 1.09 && z > 0.10) ao = Math.min(ao, 0.85);
+  return ao;
+}
+
 /**
  * Accumulates transformed primitives into one interleaved skinned geometry.
  * Build-time only, so it is allowed to allocate.
@@ -127,24 +171,42 @@ class SkinBuilder {
   /**
    * @param {THREE.BufferGeometry} geo  disposed after use
    * @param {THREE.Matrix4} m           placement into bot-local space
-   * @param {number} colour             sRGB hex tint, multiplied over the map
+   * @param {string} part               a key of KIT: atlas tile + relative tint
    * @param {(x,y,z)=>Array} skin       bot-local position -> [[boneName, w], ...]
-   * @param {number} uvScale            UV metres multiplier
+   * @param {number} uvScale            how many times the tile repeats over the piece
+   * @param {boolean} shade             apply the dirt/AO bake (off for the weapon)
    */
-  add(geo, m, colour, skin, uvScale = 2.6) {
+  add(geo, m, part, skin, uvScale = 1, shade = true) {
     geo.applyMatrix4(m);
     const p = geo.attributes.position;
     const n = geo.attributes.normal;
     const u = geo.attributes.uv;
     const base = this.pos.length / 3;
-    // Vertex colour is consumed in linear space; setHex does the conversion
-    // when colour management is on, which it is.
-    this._c.setHex(colour);
+    const kit = KIT[part] || KIT.carrier;
+    const [u0, v0, du, dv] = tileRect(kit.tile);
+    const t = kit.tint;
+
     for (let i = 0; i < p.count; i++) {
       const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
       this.pos.push(x, y, z);
       this.nrm.push(n.getX(i), n.getY(i), n.getZ(i));
-      this.uv.push((u ? u.getX(i) : 0) * uvScale, (u ? u.getY(i) : 0) * uvScale);
+      // Fold into the tile's inner rect. Mirrored rather than wrapped: a tile
+      // has no neighbours it may legally sample.
+      this.uv.push(
+        u0 + pingpong((u ? u.getX(i) : 0) * uvScale) * du,
+        v0 + pingpong((u ? u.getY(i) : 0) * uvScale) * dv,
+      );
+
+      if (shade) {
+        const g = gravity(y);
+        // Dust on the outside of the calf, where a boot throws it.
+        const calf = (y < 0.56 && y > 0.12 && Math.abs(x) > 0.115) ? 0.90 : 1;
+        const k = g * calf * bakedAO(x, y, z);
+        const warm = 0.25 * Math.min(1, (1 - g) / 0.32);
+        this._c.copy(t).lerp(WARM, warm).multiplyScalar(k);
+      } else {
+        this._c.copy(t);
+      }
       this.col.push(this._c.r, this._c.g, this._c.b);
 
       const w = skin(x, y, z);
@@ -262,202 +324,306 @@ function rbox(w, h, d, r = 0.02, seg = 1) {
   return g;
 }
 
+/**
+ * Unrounded box, 12 triangles. For anything under ~3 cm — bungee cords, chin
+ * straps, a mag flap — where the rounding radius would be a quarter of a pixel
+ * at 25 m and the 36 extra triangles buy literally nothing.
+ */
+function box(w, h, d) {
+  return new THREE.BoxGeometry(w, h, d);
+}
+
 /** Tapered limb segment, origin at its top, running down -Y for `len`. */
-function limb(rTop, rBot, len, radial = 8) {
+function limb(rTop, rBot, len, radial = 6) {
   const g = new THREE.CylinderGeometry(rTop, rBot, len, radial, 1, false);
   g.translate(0, -len / 2, 0);
   return g;
 }
 
-function sphere(r, wSeg = 10, hSeg = 7) {
+function sphere(r, wSeg = 8, hSeg = 6) {
   return new THREE.SphereGeometry(r, wSeg, hSeg);
 }
 
-// Tactical palette. These multiply the cloth/gun albedo maps, so they read
-// darker in frame than they do here — tuned against the actual screenshot.
-const C = {
-  fatigue: 0x968f76,   // dusty olive-tan combat shirt/trousers
-  fatigueDark: 0x7b7660,
-  carrier: 0x545849,   // plate carrier, coyote-green
-  pouch: 0x605f4c,
-  strap: 0x42423a,
-  boot: 0x332e28,
-  glove: 0x2b2b28,
-  helmet: 0x4f534a,
-  helmetTrim: 0x35382f,
-  goggle: 0x181b1f,
-  face: 0x24231f,      // balaclava
-  gunDark: 0x9aa0a4,   // multiplies the gun_metal map
-  gunPoly: 0x7d8288,
-  optic: 0x40464b,
-  packA: 0x625f4c,
-};
+// ------------------------------------------------------------------ the body
 
-/** The cloth half of the body. */
-function buildBody() {
+/**
+ * The whole operator, soft and hard, in one builder.
+ *
+ * Ordered head-down so that the piece with the most silhouette value sits at
+ * the top of the file where it gets read.
+ */
+function buildKit() {
   const b = new SkinBuilder();
-  const spineSkin = (x, y) => blendSpine(y);
-
-  // Pelvis + hips.
-  b.add(rbox(0.284, 0.230, 0.208, 0.05), at(0, 0.985, 0.005), C.fatigue, spineSkin);
-  // Belt.
-  b.add(rbox(0.312, 0.062, 0.228, 0.02), at(0, 0.905, 0.005), C.strap, rigid('hips'));
-  // Torso: waist to chest, wider and deeper at the top.
-  b.add(rbox(0.310, 0.290, 0.210, 0.055, 2), at(0, 1.190, 0.004), C.fatigue, spineSkin);
-  b.add(rbox(0.335, 0.230, 0.225, 0.055, 2), at(0, 1.355, 0.004), C.fatigue, spineSkin);
-  // Trapezius wedge so the neck does not grow out of a flat shelf.
-  b.add(rbox(0.290, 0.090, 0.185, 0.05), at(0, 1.452, 0.002), C.fatigue, rigid('chest'));
-
-  // Neck.
-  b.add(limb(0.058, 0.062, 0.10, 8), at(0, 1.552, -0.006), C.face, rigid('neck'));
-
-  // Head: skull, balaclava lower face, goggles.
-  b.add(sphere(0.104, 12, 9), at(0, 1.683, 0.004, 0, 0, 0, 0.92, 1.10, 1.02), C.face, rigid('head'));
-  b.add(rbox(0.150, 0.090, 0.170, 0.045), at(0, 1.628, 0.020), C.face, rigid('head'));
-
-  // Arms. Deltoid caps are rigid to the upper arm so the shoulder does not
-  // pinch when the arm comes up to a firing position.
-  for (const s of [-1, 1]) {
-    const S = s < 0 ? 'L' : 'R';
-    b.add(sphere(0.076, 10, 8), at(s * 0.186, 1.452, 0, 0, 0, 0, 1.0, 1.05, 1.0),
-      C.fatigueDark, rigid('arm' + S));
-    b.add(limb(0.062, 0.050, 0.272), at(s * 0.190, 1.446, 0.004), C.fatigue,
-      blendY('arm' + S, 'forearm' + S, 1.245, 1.172));
-    b.add(sphere(0.052, 8, 6), at(s * 0.204, 1.172, 0.010), C.fatigue, rigid('forearm' + S));
-    // Rolled sleeve cuff — a hard line on the forearm is a strong read.
-    b.add(limb(0.052, 0.041, 0.240), at(s * 0.206, 1.170, 0.012), C.fatigueDark,
-      blendY('forearm' + S, 'hand' + S, 0.985, 0.935));
-    b.add(rbox(0.056, 0.098, 0.092, 0.022), at(s * 0.218, 0.892, 0.026), C.glove, rigid('hand' + S));
-  }
-
-  // Legs.
-  for (const s of [-1, 1]) {
-    const S = s < 0 ? 'L' : 'R';
-    // Combat trousers, not tights: the legs were reading as two poles with a
-    // stripe of bright street between them.
-    b.add(limb(0.122, 0.094, 0.435, 9), at(s * 0.096, 0.932, 0.004), C.fatigue,
-      blendY('thigh' + S, 'shin' + S, 0.585, 0.495));
-    b.add(sphere(0.086, 9, 7), at(s * 0.100, 0.495, 0.008), C.fatigue, rigid('shin' + S));
-    b.add(limb(0.094, 0.070, 0.330, 9), at(s * 0.100, 0.492, 0.006), C.fatigue,
-      blendY('shin' + S, 'foot' + S, 0.260, 0.190));
-    // Blousing over the boot: a distinct step in the silhouette at the ankle.
-    b.add(limb(0.088, 0.079, 0.078, 9), at(s * 0.100, 0.182, 0.002), C.fatigueDark,
-      rigid('shin' + S));
-  }
-  return b.finish();
-}
-
-/** The hard half: armour, helmet, boots, pouches, weapon. */
-function buildGear() {
-  const b = new SkinBuilder();
-
-  // Plate carrier: front and back plates plus a cummerbund, sitting proud of
-  // the torso. This is most of the upper-body silhouette.
-  b.add(rbox(0.330, 0.330, 0.075, 0.030), at(0, 1.288, 0.118), C.carrier, rigid('chest'), 2.2);
-  b.add(rbox(0.330, 0.350, 0.070, 0.030), at(0, 1.288, -0.112), C.carrier, rigid('chest'), 2.2);
-  b.add(rbox(0.328, 0.185, 0.238, 0.035), at(0, 1.180, 0.004), C.carrier, rigid('spine'), 2.2);
-  // Shoulder straps.
-  for (const s of [-1, 1]) {
-    b.add(rbox(0.078, 0.062, 0.250, 0.020), at(s * 0.108, 1.432, 0.010), C.strap, rigid('chest'), 2.2);
-  }
-  // Magazine pouches, front, three across — the read that says "soldier".
-  for (let i = -1; i <= 1; i++) {
-    b.add(rbox(0.088, 0.150, 0.062, 0.018), at(i * 0.094, 1.192, 0.170, 0.10), C.pouch, rigid('chest'), 2.4);
-  }
-  // Admin pouch and a radio on the left strap.
-  b.add(rbox(0.130, 0.095, 0.055, 0.016), at(-0.070, 1.352, 0.162), C.pouch, rigid('chest'), 2.4);
-  b.add(rbox(0.062, 0.115, 0.048, 0.014), at(0.128, 1.372, 0.086), C.helmetTrim, rigid('chest'), 2.4);
-  b.add(limb(0.006, 0.006, 0.170, 5), at(0.128, 1.560, 0.086, -0.22), C.helmetTrim, rigid('chest'), 2.4);
-  // Assault pack.
-  b.add(rbox(0.300, 0.360, 0.150, 0.045), at(0, 1.300, -0.212), C.packA, rigid('chest'), 2.0);
-  b.add(rbox(0.230, 0.110, 0.090, 0.025), at(0, 1.180, -0.300), C.pouch, rigid('chest'), 2.4);
-  // Hip pouches / dump pouch.
-  for (const s of [-1, 1]) {
-    b.add(rbox(0.090, 0.130, 0.080, 0.020), at(s * 0.168, 0.918, -0.030), C.pouch, rigid('hips'), 2.4);
-  }
-  // Knee pads.
-  for (const s of [-1, 1]) {
-    const S = s < 0 ? 'L' : 'R';
-    b.add(rbox(0.110, 0.150, 0.060, 0.028), at(s * 0.100, 0.520, 0.062), C.helmetTrim, rigid('shin' + S), 2.4);
-  }
-
-  // Boots. Authored so the sole sits exactly on y = 0 in the rest pose — the
-  // foot IK plants the ankle at ground + 0.085, and a sole modelled below the
-  // origin would bury itself in the road.
-  for (const s of [-1, 1]) {
-    const S = s < 0 ? 'L' : 'R';
-    b.add(rbox(0.120, 0.106, 0.286, 0.026), at(s * 0.100, 0.066, 0.030), C.boot, rigid('foot' + S), 2.4);
-    b.add(rbox(0.128, 0.034, 0.300, 0.014), at(s * 0.100, 0.017, 0.032), C.helmetTrim, rigid('foot' + S), 2.4);
-    // Toe box, so the boot is not one slab from heel to tip.
-    b.add(rbox(0.108, 0.070, 0.090, 0.030), at(s * 0.100, 0.050, 0.145), C.boot, rigid('toe' + S), 2.4);
-  }
-
-  // Sling, worn across the chest. It is skinned to the torso rather than to the
-  // weapon: a strap that has to stretch between two independently animated
-  // bones is a rig problem with no visual payoff at 15 m, and the read we want
-  // is just the diagonal line across the plate carrier.
-  b.add(rbox(0.048, 0.400, 0.028, 0.012), at(-0.052, 1.300, 0.148, 0, 0, -0.52), C.strap, rigid('chest'), 2.4);
-  b.add(rbox(0.044, 0.230, 0.026, 0.012), at(-0.150, 1.400, -0.030, 0, 0.9, -0.30), C.strap, rigid('chest'), 2.4);
-
-  // Helmet: dome, brim, NVG mount, side rails.
-  const dome = new THREE.SphereGeometry(0.128, 14, 9, 0, Math.PI * 2, 0, Math.PI * 0.58);
-  b.add(dome, at(0, 1.672, 0.002, 0, 0, 0, 1.0, 1.06, 1.08), C.helmet, rigid('head'), 2.0);
-  b.add(rbox(0.228, 0.034, 0.248, 0.016), at(0, 1.678, 0.010), C.helmet, rigid('head'), 2.2);
-  b.add(rbox(0.052, 0.052, 0.040, 0.010), at(0, 1.742, 0.108), C.helmetTrim, rigid('head'), 2.4);
-  b.add(rbox(0.013, 0.026, 0.128, 0.006), at(-0.112, 1.698, 0.012), C.helmetTrim, rigid('head'), 2.4);
-  b.add(rbox(0.013, 0.026, 0.128, 0.006), at(0.112, 1.698, 0.012), C.helmetTrim, rigid('head'), 2.4);
-  // Goggles pushed up on the brim: a bright specular line at eye level, which
-  // is what makes a helmeted head read as a head and not a lump.
-  b.add(rbox(0.190, 0.052, 0.060, 0.020), at(0, 1.706, 0.092, -0.15), C.goggle, rigid('head'), 3.0);
-
+  buildHead(b);
+  buildTorso(b);
+  buildArms(b);
+  buildLegs(b);
   buildWeapon(b);
   return b.finish();
 }
 
 /**
+ * The head: 100% silhouette, 0% face.
+ *
+ * The old head was a bare ball — the dome stood 1.1 cm proud of the skull,
+ * which at 26 m is 0.3 px, so it read as a skull with nothing on it, and the
+ * goggle block caught a broad specular and rendered as a white face plate. This
+ * version puts 5.1 cm of helmet over the skull, stows the NVGs UP off the
+ * mount (both bo6_03 operators have them there, and it is the single most
+ * recognisable 40 triangles in the frame), and widens the head from 19 to 24 cm
+ * with comms cups. The face itself is one flat quad in shadow with no features
+ * at all, which is exactly what mw3_05 shows at 28 m.
+ */
+function buildHead(b) {
+  const H = rigid('head');
+
+  // Skull under the helmet: a balaclava, deliberately small so the shell reads.
+  b.add(sphere(0.092, 10, 7), at(0, 1.664, 0, 0, 0, 0, 0.94, 1.05, 1.02), 'gaiter', H, 1);
+  // Jaw/chin mass, so the profile is not a sphere on a stick.
+  b.add(rbox(0.138, 0.082, 0.150, 0.040), at(0, 1.606, 0.014), 'gaiter', H, 1);
+
+  // Helmet shell: crown at 1.812, 23.6 cm across the widest point.
+  const shell = new THREE.SphereGeometry(0.118, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.62);
+  b.add(shell, at(0, 1.682, 0, 0, 0, 0, 1.00, 1.10, 1.06), 'helmetCover', H, 1);
+  // Brim. A hard shadow line above the eye band is most of what says "helmet".
+  b.add(rbox(0.232, 0.030, 0.252, 0.014), at(0, 1.688, 0.012), 'helmet', H, 1);
+  // Rear counterweight pouch: breaks the back of the profile, which otherwise
+  // is a perfect circle and reads as a motorcycle helmet.
+  b.add(rbox(0.112, 0.082, 0.052, 0.016), at(0, 1.726, -0.138), 'pouch', H, 1);
+  // Side rails.
+  for (const s of [-1, 1]) {
+    b.add(rbox(0.013, 0.026, 0.128, 0.006), at(s * 0.118, 1.700, 0.012), 'helmetHard', H, 1);
+  }
+  // Three bungee cords laid crown-to-rear: they catch one specular line each
+  // and break up an otherwise perfectly smooth dome.
+  for (const i of [-1, 0, 1]) {
+    b.add(box(0.008, 0.006, 0.150), at(i * 0.046, 1.790 - Math.abs(i) * 0.016, -0.030, 0.62), 'shockCord', H, 1);
+  }
+
+  // NVG mount and the stowed-up bino. This mass stands 6.6 cm above the crown
+  // and 10 cm forward of the brow: 3 x 2 px of unmistakable profile at 26 m.
+  b.add(rbox(0.058, 0.048, 0.036, 0.010), at(0, 1.760, 0.118), 'helmetHard', H, 1);
+  b.add(rbox(0.026, 0.096, 0.024, 0.008), at(0, 1.826, 0.112, -0.30), 'helmetHard', H, 1);
+  b.add(rbox(0.086, 0.030, 0.040, 0.008), at(0, 1.874, 0.096), 'helmetHard', H, 1);
+  for (const s of [-1, 1]) {
+    b.add(new THREE.CylinderGeometry(0.023, 0.026, 0.070, 8),
+      at(s * 0.031, 1.878, 0.100, 1.35), 'polymer', H, 1);
+    // Objective lens. Points along the bell axis, which rotating x by 1.35
+    // leaves at (0, cos, sin); a circle's normal is +Z, hence 1.35 - PI/2.
+    b.add(new THREE.CircleGeometry(0.021, 8),
+      at(s * 0.031, 1.878 + 0.0077, 0.100 + 0.0342, 1.35 - Math.PI / 2), 'optic', H, 1);
+  }
+
+  // Comms: ear cups take the head from 19 to 24 cm wide, which is a real
+  // silhouette change, plus a headband arc and a boom mic. The mic is 15
+  // triangles and reads as a black hairline against a bright wall.
+  for (const s of [-1, 1]) {
+    b.add(new THREE.CylinderGeometry(0.043, 0.043, 0.038, 10),
+      at(s * 0.104, 1.652, -0.004, 0, 0, Math.PI / 2), 'rubber', H, 1);
+  }
+  for (let i = 0; i < 6; i++) {
+    const t = (i + 0.5) / 6;
+    const a = Math.PI * t;
+    b.add(box(0.022, 0.030, 0.024),
+      at(-0.104 * Math.cos(a), 1.652 + 0.140 * Math.sin(a), -0.006, 0, 0, a - Math.PI / 2),
+      'polymer', H, 1);
+  }
+  b.add(new THREE.CylinderGeometry(0.005, 0.004, 0.108, 5),
+    at(-0.086, 1.630, 0.060, 1.30, 0.34, 0), 'polymer', H, 1);
+
+  // Chin Y-yoke, two members down to the jaw.
+  for (const s of [-1, 1]) {
+    b.add(box(0.014, 0.078, 0.014), at(s * 0.072, 1.598, 0.030, -0.34, 0, s * 0.42), 'webbing', H, 1);
+  }
+
+  // Eye-pro band: roughness 0.10 via the optic-glass tile, so it gives ONE
+  // narrow specular line at eye level. The block this replaces was a
+  // half-metallic slab that blew out to a white face plate in sunlight.
+  b.add(rbox(0.168, 0.042, 0.026, 0.010), at(0, 1.666, 0.098), 'eyePro', H, 1);
+  // The face. One flat quad, recessed behind both the band and the brim so it
+  // lives permanently in the brim's own shadow. No eyes, no slit, no nose, no
+  // mouth, no normal detail — mw3_05's operator is a featureless void at 28 m.
+  b.add(new THREE.PlaneGeometry(0.132, 0.096), at(0, 1.632, 0.086), 'faceVoid', H, 1);
+}
+
+/**
+ * Torso, plate carrier and load. Two authorised accents and no more: one coyote
+ * element and one arm patch, which is the mw3_05 formula.
+ */
+function buildTorso(b) {
+  const spineSkin = (x, y) => blendSpine(y);
+  const CH = rigid('chest');
+
+  // Pelvis, belt, torso, trapezius.
+  b.add(rbox(0.284, 0.230, 0.208, 0.05), at(0, 0.985, 0.005), 'trouser', spineSkin, 1.4);
+  b.add(rbox(0.312, 0.062, 0.228, 0.02), at(0, 0.905, 0.005), 'webbing', rigid('hips'), 2.2);
+  b.add(rbox(0.310, 0.290, 0.210, 0.055, 2), at(0, 1.190, 0.004), 'shirt', spineSkin, 1.6);
+  b.add(rbox(0.335, 0.230, 0.225, 0.055, 2), at(0, 1.355, 0.004), 'shirt', spineSkin, 1.6);
+  b.add(rbox(0.290, 0.090, 0.185, 0.05), at(0, 1.452, 0.002), 'shirtWorn', CH, 1.4);
+  // Neck gaiter. No exposed skin anywhere on a bot, ever.
+  b.add(limb(0.058, 0.062, 0.10, 6), at(0, 1.552, -0.006), 'gaiter', rigid('neck'), 1);
+
+  // Plate carrier. Medium SAPI is 24.5 x 31.7 cm and the bag around it is
+  // 28 x 36 x 6; the old 33 x 33 x 7.5 slab read as a sandwich board.
+  b.add(rbox(0.290, 0.360, 0.062, 0.026), at(0, 1.240, 0.126), 'carrier', CH, 1.2);
+  b.add(rbox(0.290, 0.380, 0.058, 0.026), at(0, 1.245, -0.118), 'carrierBack', CH, 1.2);
+  // Cummerbund on the MOLLE ladder: the most legible tile in the atlas at
+  // range, so it goes where the eye lands.
+  b.add(rbox(0.318, 0.170, 0.240, 0.030), at(0, 1.176, 0.004), 'molle', rigid('spine'), 1.6);
+
+  // Shoulder yoke. The top of a kitted shoulder is FLAT, not a ball: this
+  // squares the top 9 cm, takes bideltoid breadth from 52.4 to 55.6 cm, and is
+  // where the sky sheen lands.
+  for (const s of [-1, 1]) {
+    b.add(rbox(0.092, 0.036, 0.210, 0.014), at(s * 0.130, 1.470, 0.008), 'molle', CH, 1.2);
+    b.add(rbox(0.078, 0.062, 0.250, 0.020), at(s * 0.108, 1.432, 0.010), 'webbing', CH, 1.8);
+  }
+
+  // Mag shingle, BELOW the plate where it actually lives, each pouch with a
+  // flap standing proud. Three horizontal shadow lines across the chest is the
+  // read that says "soldier" at 28 m; mw3_05 shows four.
+  for (let i = -1; i <= 1; i++) {
+    b.add(rbox(0.088, 0.150, 0.062, 0.018), at(i * 0.094, 1.108, 0.172), 'accentTan', CH, 1.4);
+    b.add(rbox(0.094, 0.040, 0.070, 0.012), at(i * 0.094, 1.166, 0.176), 'accentTanWeb', CH, 1.4);
+  }
+  // Admin pouch.
+  b.add(rbox(0.130, 0.095, 0.055, 0.016), at(-0.070, 1.330, 0.162), 'pouch', CH, 1.4);
+
+  // Radio on the LEFT REAR cummerbund with a two-segment whip raking back 22
+  // degrees. 34 cm of antenna, up from 17: a thin dark diagonal above the
+  // shoulder line is a strong, cheap, unmistakably military read.
+  b.add(rbox(0.062, 0.115, 0.048, 0.014), at(-0.132, 1.262, -0.140), 'polymer', CH, 1.2);
+  b.add(new THREE.CylinderGeometry(0.006, 0.005, 0.170, 5), at(-0.132, 1.400, -0.160, -0.30), 'polymer', CH, 1);
+  b.add(new THREE.CylinderGeometry(0.005, 0.004, 0.185, 5), at(-0.132, 1.560, -0.208, -0.42), 'polymer', CH, 1);
+
+  // Low-profile back panel. The old 30 x 36 x 15 assault pack was a suitcase.
+  b.add(rbox(0.258, 0.340, 0.092, 0.030), at(0, 1.290, -0.186), 'carrierBack', CH, 1.2);
+  b.add(rbox(0.230, 0.100, 0.070, 0.022), at(0, 1.130, -0.196), 'pouch', CH, 1.4);
+
+  // Hip / dump pouches.
+  for (const s of [-1, 1]) {
+    b.add(rbox(0.090, 0.130, 0.080, 0.020), at(s * 0.168, 0.918, -0.030), 'pouch', rigid('hips'), 1.4);
+  }
+
+  // Thigh holster: 48 triangles and a strong 20-40 m silhouette breaker,
+  // because it puts a hard rectangle where the leg is otherwise a smooth tube.
+  b.add(rbox(0.116, 0.208, 0.062, 0.020), at(0.118, 0.716, 0.026), 'polymer', rigid('thighR'), 1.2);
+  b.add(box(0.120, 0.024, 0.070), at(0.118, 0.826, 0.026), 'webbing', rigid('thighR'), 1);
+
+  // Sling: flat 25 mm webbing, never metallic. The rbox this replaces was on
+  // the half-metal gear material and rendered as a gold bandolier.
+  b.add(rbox(0.026, 0.400, 0.016, 0.006), at(-0.052, 1.300, 0.152, 0, 0, -0.52), 'webbing', CH, 2.2);
+  b.add(rbox(0.026, 0.230, 0.014, 0.006), at(-0.150, 1.400, -0.030, 0, 0.9, -0.30), 'webbing', CH, 2.2);
+
+  // Accent two of two: a 5.0 x 3.5 cm arm patch, flat, 2 mm proud of the right
+  // deltoid. Nothing else on the bot is allowed a third colour.
+  b.add(new THREE.PlaneGeometry(0.050, 0.035), at(0.264, 1.432, 0.014, 0, Math.PI / 2, 0),
+    'patch', rigid('armR'), 1);
+}
+
+function buildArms(b) {
+  for (const s of [-1, 1]) {
+    const S = s < 0 ? 'L' : 'R';
+    // Deltoid caps are rigid to the upper arm so the shoulder does not pinch
+    // when the arm comes up to a firing position.
+    b.add(sphere(0.076, 8, 6), at(s * 0.186, 1.452, 0, 0, 0, 0, 1.0, 1.05, 1.0),
+      'shirtWorn', rigid('arm' + S), 1);
+    b.add(limb(0.062, 0.050, 0.272, 6), at(s * 0.190, 1.446, 0.004), 'shirt',
+      blendY('arm' + S, 'forearm' + S, 1.245, 1.172), 1.4);
+    b.add(sphere(0.052, 6, 5), at(s * 0.204, 1.172, 0.010), 'shirt', rigid('forearm' + S), 1);
+    // Rolled sleeve cuff — a hard line on the forearm is a strong read.
+    b.add(limb(0.052, 0.041, 0.240, 6), at(s * 0.206, 1.170, 0.012), 'shirtWorn',
+      blendY('forearm' + S, 'hand' + S, 0.985, 0.935), 1.4);
+
+    // GLOVES. The rifle used to be held by two tapered tubes with nothing on
+    // the end of them, which is visible at 15 m and unforgivable at 11. Palm,
+    // knuckle wedge and a mitten thumb: no individual fingers, ever — they
+    // alias into a smear and cost 200 triangles for the privilege.
+    const H = rigid('hand' + S);
+    b.add(rbox(0.052, 0.096, 0.090, 0.020), at(s * 0.218, 0.892, 0.026), 'glove', H, 1);
+    b.add(box(0.054, 0.032, 0.040), at(s * 0.218, 0.850, 0.052), 'glove', H, 1);
+    b.add(box(0.026, 0.048, 0.032), at(s * 0.188, 0.902, 0.050), 'glove', H, 1);
+  }
+}
+
+function buildLegs(b) {
+  for (const s of [-1, 1]) {
+    const S = s < 0 ? 'L' : 'R';
+    // Combat trousers, not tights: the legs were reading as two poles with a
+    // stripe of bright street between them.
+    b.add(limb(0.122, 0.094, 0.435, 6), at(s * 0.096, 0.932, 0.004), 'trouser',
+      blendY('thigh' + S, 'shin' + S, 0.585, 0.495), 1.4);
+    b.add(sphere(0.086, 6, 5), at(s * 0.100, 0.495, 0.008), 'trouser', rigid('shin' + S), 1);
+    b.add(limb(0.094, 0.070, 0.330, 6), at(s * 0.100, 0.492, 0.006), 'trouser',
+      blendY('shin' + S, 'foot' + S, 0.260, 0.190), 1.4);
+    // Blousing over the boot: a distinct step in the silhouette at the ankle.
+    b.add(limb(0.088, 0.079, 0.078, 6), at(s * 0.100, 0.182, 0.002), 'shirtWorn',
+      rigid('shin' + S), 1);
+
+    // Knee pads.
+    b.add(rbox(0.110, 0.150, 0.060, 0.028), at(s * 0.100, 0.520, 0.062), 'polymer',
+      rigid('shin' + S), 1.2);
+
+    // Boots. Authored so the sole sits exactly on y = 0 in the rest pose — the
+    // foot IK plants the ankle at ground + 0.085, and a sole modelled below the
+    // origin would bury itself in the road.
+    b.add(rbox(0.120, 0.106, 0.286, 0.026), at(s * 0.100, 0.066, 0.030), 'rubber',
+      rigid('foot' + S), 1.2);
+    b.add(rbox(0.128, 0.034, 0.300, 0.014), at(s * 0.100, 0.017, 0.032), 'sole',
+      rigid('foot' + S), 1.6);
+    // Toe box, so the boot is not one slab from heel to tip.
+    b.add(rbox(0.108, 0.070, 0.090, 0.030), at(s * 0.100, 0.050, 0.145), 'rubber',
+      rigid('toe' + S), 1.2);
+  }
+}
+
+/**
  * Carbine, authored in weapon-bone local space: bore along +Z at y = 0.052,
  * origin at the web of the firing hand. ~0.86 m overall.
+ *
+ * `shade` is off for every piece: the dirt-gravity ramp is a function of height
+ * in the REST pose, and the weapon does not stay there.
  */
 function buildWeapon(b) {
   const w = restPos('weapon');
-  const put = (geo, x, y, z, rx = 0, ry = 0, rz = 0, colour = C.gunDark, uv = 3.4) =>
-    b.add(geo, at(w.x + x, w.y + y, w.z + z, rx, ry, rz), colour, rigid('weapon'), uv);
+  const put = (geo, x, y, z, rx = 0, ry = 0, rz = 0, part = 'gunMetal', uv = 1.6) =>
+    b.add(geo, at(w.x + x, w.y + y, w.z + z, rx, ry, rz), part, rigid('weapon'), uv, false);
 
   // Lower + upper receiver.
-  put(rbox(0.044, 0.082, 0.230, 0.010), 0, 0.020, 0.062, 0, 0, 0, C.gunPoly);
+  put(rbox(0.044, 0.082, 0.230, 0.010), 0, 0.020, 0.062, 0, 0, 0, 'gunPoly');
   put(rbox(0.046, 0.062, 0.300, 0.010), 0, 0.078, 0.070);
   // Charging handle / dust cover ridge.
-  put(rbox(0.050, 0.016, 0.120, 0.005), 0, 0.112, -0.040);
+  put(box(0.050, 0.016, 0.120), 0, 0.112, -0.040);
   // Pistol grip.
-  put(rbox(0.038, 0.115, 0.052, 0.014), 0, -0.048, -0.028, 0.32, 0, 0, C.gunPoly);
+  put(rbox(0.038, 0.115, 0.052, 0.014), 0, -0.048, -0.028, 0.32, 0, 0, 'gunPoly');
   // Trigger guard.
-  put(rbox(0.030, 0.012, 0.070, 0.005), 0, -0.016, 0.032);
+  put(box(0.030, 0.012, 0.070), 0, -0.016, 0.032);
   // Magazine, raked forward like a STANAG curve.
-  put(rbox(0.032, 0.185, 0.072, 0.010), 0, -0.075, 0.088, 0.20, 0, 0, C.gunPoly);
+  put(rbox(0.032, 0.185, 0.072, 0.010), 0, -0.075, 0.088, 0.20, 0, 0, 'gunPoly');
   // Handguard with a rail top.
-  put(rbox(0.048, 0.060, 0.270, 0.010), 0, 0.070, 0.300, 0, 0, 0, C.gunPoly);
-  put(rbox(0.036, 0.012, 0.270, 0.004), 0, 0.104, 0.300);
+  put(rbox(0.048, 0.060, 0.270, 0.010), 0, 0.070, 0.300, 0, 0, 0, 'gunPoly');
+  put(box(0.036, 0.012, 0.270), 0, 0.104, 0.300);
   // Barrel + muzzle device.
-  put(new THREE.CylinderGeometry(0.011, 0.011, 0.110, 8), 0, 0.052, 0.480, Math.PI / 2);
+  put(new THREE.CylinderGeometry(0.011, 0.011, 0.110, 6), 0, 0.052, 0.480, Math.PI / 2);
   put(new THREE.CylinderGeometry(0.017, 0.015, 0.058, 8), 0, 0.052, 0.552, Math.PI / 2);
   // Collapsible stock: buffer tube, cheek riser, butt pad.
-  put(new THREE.CylinderGeometry(0.019, 0.019, 0.190, 8), 0, 0.072, -0.130, Math.PI / 2);
-  put(rbox(0.042, 0.070, 0.150, 0.014), 0, 0.062, -0.185, 0, 0, 0, C.gunPoly);
-  put(rbox(0.048, 0.104, 0.028, 0.010), 0, 0.054, -0.268, 0, 0, 0, C.gunPoly);
+  put(new THREE.CylinderGeometry(0.019, 0.019, 0.190, 6), 0, 0.072, -0.130, Math.PI / 2);
+  put(rbox(0.042, 0.070, 0.150, 0.014), 0, 0.062, -0.185, 0, 0, 0, 'gunPoly');
+  put(rbox(0.048, 0.104, 0.028, 0.010), 0, 0.054, -0.268, 0, 0, 0, 'gunPoly');
   // Optic: mount, tube, glass face.
-  put(rbox(0.034, 0.032, 0.070, 0.008), 0, 0.120, 0.090, 0, 0, 0, C.optic);
-  put(new THREE.CylinderGeometry(0.024, 0.024, 0.098, 10), 0, 0.148, 0.092, Math.PI / 2, 0, 0, C.optic);
-  put(new THREE.CylinderGeometry(0.021, 0.021, 0.006, 10), 0, 0.148, 0.044, Math.PI / 2, 0, 0, C.goggle);
+  put(rbox(0.034, 0.032, 0.070, 0.008), 0, 0.120, 0.090, 0, 0, 0, 'polymer');
+  put(new THREE.CylinderGeometry(0.024, 0.024, 0.098, 8), 0, 0.148, 0.092, Math.PI / 2, 0, 0, 'polymer');
+  put(new THREE.CylinderGeometry(0.021, 0.021, 0.006, 8), 0, 0.148, 0.044, Math.PI / 2, 0, 0, 'optic');
   // Vertical foregrip and a sling loop: two things that break the tube.
-  put(rbox(0.026, 0.078, 0.030, 0.010), 0, 0.020, 0.330, -0.12, 0, 0, C.gunPoly);
-  put(rbox(0.030, 0.026, 0.014, 0.005), 0, 0.040, -0.052);
+  put(rbox(0.026, 0.078, 0.030, 0.010), 0, 0.020, 0.330, -0.12, 0, 0, 'gunPoly');
+  put(box(0.030, 0.026, 0.014), 0, 0.040, -0.052);
 }
 
 let _shared = null;
 
-/** Both bot geometries, built once and shared by every bot in the pool. */
+/** The single bot geometry, built once and shared by every bot in the pool. */
 export function getRigGeometry() {
-  if (!_shared) _shared = { body: buildBody(), gear: buildGear() };
+  if (!_shared) _shared = { kit: buildKit() };
   return _shared;
 }
 
@@ -491,7 +657,6 @@ export function createSkeleton() {
 
 export function disposeRigGeometry() {
   if (!_shared) return;
-  _shared.body.dispose();
-  _shared.gear.dispose();
+  _shared.kit.dispose();
   _shared = null;
 }

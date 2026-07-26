@@ -1,7 +1,8 @@
 import * as THREE from 'three';
-import { Bot } from './Bot.js';
+import { Bot, MAX_TWIST } from './Bot.js';
 import { NavMesh } from './NavMesh.js';
 import { disposeRigGeometry } from './BotRig.js';
+import { botTint, contactShadowTexture, disposeKitAtlas } from './BotKitAtlas.js';
 
 /**
  * The AI system: a pool of combatants, the navmesh they walk on, and the
@@ -21,6 +22,23 @@ import { disposeRigGeometry } from './BotRig.js';
 const MAX_BOTS = 10;
 const MASK_WORLD = 1 | 2;
 
+/**
+ * Overall exposure of the kit, multiplied into every bot's material colour.
+ *
+ * The atlas tiles carry the authored albedo (cordura 0.10 linear, boot sole
+ * 0.040) and the vertex colours carry the dirt gradient; this is the one knob
+ * that decides where the whole operator sits against his background. Measured
+ * against `combat`: the references put CoD operators at L*20-32 against L*40-63
+ * backgrounds, always 25-42 points DARKER, and the old bots were on average
+ * 25 L* too bright.
+ */
+const KIT_EXPOSURE = 0.62;
+
+// Contact shadow: quad footprint in metres, and the distance it fades out over.
+const CONTACT_W = 0.62;
+const CONTACT_D = 0.46;
+const CONTACT_FADE = [38, 45];
+
 const _v0 = new THREE.Vector3();
 const _v1 = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -36,6 +54,12 @@ const _sFwd = new THREE.Vector3();
 const _sRight = new THREE.Vector3();
 const _sTmp = new THREE.Vector3();
 const UP_Y = new THREE.Vector3(0, 1, 0);
+// Contact-shadow instancing scratch.
+const _cm = new THREE.Matrix4();
+const _cp = new THREE.Vector3();
+const _cs = new THREE.Vector3();
+const _cq = new THREE.Quaternion();
+const _cc = new THREE.Color();
 
 /**
  * The `combat` camera preset from `tools/shoot.mjs`. Staging is authored
@@ -122,17 +146,158 @@ export class AISystem {
 
   // --------------------------------------------------------------- lifecycle
 
+  /**
+   * ONE material for the whole operator.
+   *
+   * The pair this replaces was the single worst bug on the bots: `gun_metal` at
+   * metalness 0.35 / roughness 0.52 shaded every hard part of the kit — helmet,
+   * kneepads, pouches, boots, goggles — as a semi-metal, which against a
+   * 4800 K sun blew the goggle block out to a white face plate and turned the
+   * sling into a gold bandolier. Real kit is 100% dielectric except the barrel,
+   * the buckles and the optic body, and the packed `bot_kit` ORM says so per
+   * tile. Collapsing to one material is also what takes a bot from 8 draws to
+   * 4 and pays for the rest of this wave.
+   */
   _materials(ctx) {
     if (this.materials) return this.materials;
     const lib = ctx.materials;
     if (!lib?.get) return null;
-    // Vertex colours carry the kit palette over one shared albedo per half of
-    // the body, so every bot in the game is two draw calls and one program.
-    this.materials = {
-      body: lib.get('fabric_canvas', { vertexColors: true }),
-      gear: lib.get('gun_metal', { vertexColors: true, roughness: 0.52, metalness: 0.35 }),
-    };
+    const hasKit = Array.isArray(lib.keys) && lib.keys.indexOf('bot_kit') >= 0;
+    this.materials = { key: hasKit ? 'bot_kit' : 'rubber', lib, cache: new Map() };
     return this.materials;
+  }
+
+  /**
+   * The tinted material instance for one bot slot.
+   *
+   * Per-bot variation rides entirely on the material colour, which three's
+   * program cache key does not include — so ten differently-tinted bots are ten
+   * draw calls and ONE program, exactly as one shared material would be.
+   */
+  botMaterial(index) {
+    const m = this.materials;
+    let mat = m.cache.get(index);
+    if (mat) return mat;
+    const tint = botTint(index, KIT_EXPOSURE);
+    // Fallback path for a build where the kit atlas has not landed. metalness
+    // MUST be 0 either way: that one value is the blown face and the gold sling.
+    mat = m.key === 'bot_kit'
+      ? m.lib.get('bot_kit', { vertexColors: true, color: tint })
+      : m.lib.get('rubber', { vertexColors: true, color: tint, roughness: 0.55, metalness: 0.0 });
+    m.cache.set(index, mat);
+    return mat;
+  }
+
+  /**
+   * One InstancedMesh carrying every bot's contact shadow: two quads per bot,
+   * one under each boot, for ONE draw call in total.
+   *
+   * Every bot in the old frame floated — the trailing boot had a hard
+   * sole/road boundary with nothing under it, which is rubric dimension 4 and
+   * reads instantly as a sprite pasted onto a photograph. This is not an
+   * alpha-blended black card, which becomes a visible grey sticker once ACES
+   * has had a go at it. It is a genuine MULTIPLY against the framebuffer:
+   * `blendDst = OneMinusSrcColor` gives `dst * (1 - occlusion)`, so the road
+   * keeps its own colour and its own texture and simply gets darker, and an
+   * occlusion of zero is provably a no-op.
+   *
+   * (The brief specified `blendDst = SrcColor` with an inverted texture. That
+   * form cannot carry a per-instance opacity — scaling the source toward zero
+   * drives the result to BLACK rather than to no-op — and a foot lifting off
+   * the ground has to be able to fade its shadow out. This form can.)
+   */
+  _ensureContacts() {
+    if (this.contactMesh) return this.contactMesh;
+    const geo = new THREE.PlaneGeometry(1, 1);
+    geo.rotateX(-Math.PI / 2);
+    // three only forwards `instanceColor` to the fragment stage under
+    // USE_COLOR, which is gated on material.vertexColors, which in turn needs a
+    // real colour attribute or the unbound attribute reads as black.
+    const n = geo.attributes.position.count;
+    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3).fill(1), 3));
+
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      map: contactShadowTexture(),
+      vertexColors: true,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.CustomBlending,
+      blendEquation: THREE.AddEquation,
+      blendSrc: THREE.ZeroFactor,
+      blendDst: THREE.OneMinusSrcColorFactor,
+      blendEquationAlpha: THREE.AddEquation,
+      blendSrcAlpha: THREE.ZeroFactor,
+      blendDstAlpha: THREE.OneFactor,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+      // The source is an occlusion mask, not radiance: it must not be tone
+      // mapped and it must not be fogged toward the fog colour.
+      toneMapped: false,
+      fog: false,
+    });
+
+    const mesh = new THREE.InstancedMesh(geo, mat, MAX_BOTS * 2);
+    mesh.name = 'botContacts';
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 2;
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.instanceColor =
+      new THREE.InstancedBufferAttribute(new Float32Array(MAX_BOTS * 2 * 3), 3);
+    mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    mesh.visible = false;
+    this.contactMesh = mesh;
+    this.root.add(mesh);
+    return mesh;
+  }
+
+  /**
+   * Place two quads under every living bot. Opacity falls off as the foot
+   * lifts and the quad spreads as it goes, which is contact hardening — the
+   * shadow is tight and dark where the sole touches and wide and weak once it
+   * is in the air (rubric dimension 3).
+   */
+  _updateContacts(ctx) {
+    const mesh = this._ensureContacts();
+    const cam = ctx?.camera;
+    let used = 0;
+    for (const bot of this.bots) {
+      const feet = bot.alive && bot.active ? bot.anim?.feet : null;
+      if (!feet) continue;
+      let fade = 1;
+      if (cam) {
+        const d = Math.hypot(cam.position.x - bot.position.x, cam.position.z - bot.position.z);
+        fade = 1 - THREE.MathUtils.smoothstep(d, CONTACT_FADE[0], CONTACT_FADE[1]);
+      }
+      if (fade <= 0.002) continue;
+      _cq.setFromAxisAngle(UP_Y, bot.yaw);
+      for (let i = 0; i < 2 && used < MAX_BOTS * 2; i++) {
+        const f = feet[i];
+        const groundY = f.swinging
+          ? THREE.MathUtils.lerp(f.prev.y, f.target.y, f.t)
+          : f.plant.y;
+        const lift = Math.max(0, f.pos.y - groundY);
+        const opacity = fade * (1 - THREE.MathUtils.smoothstep(lift, 0.02, 0.25));
+        if (opacity <= 0.002) continue;
+        const spread = 1 + Math.min(lift, 0.25) * 1.8;
+        _cp.set(f.pos.x, groundY + 0.012, f.pos.z);
+        _cs.set(CONTACT_W * spread, 1, CONTACT_D * spread);
+        _cm.compose(_cp, _cq, _cs);
+        mesh.setMatrixAt(used, _cm);
+        _cc.setScalar(opacity);
+        mesh.setColorAt(used, _cc);
+        used++;
+      }
+    }
+    // Instances are written densely from zero and `count` does the culling, so
+    // an uninitialised identity matrix can never reach the rasteriser.
+    mesh.count = used;
+    mesh.visible = used > 0;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   }
 
   _acquire() {
@@ -287,7 +452,10 @@ export class AISystem {
   // ------------------------------------------------------------------- tick
 
   update(dt, ctx) {
-    if (!this.bots.length) return;
+    if (!this.bots.length) {
+      if (this.contactMesh) this.contactMesh.visible = false;
+      return;
+    }
     if (!this.nav.ready) {
       this._navTimer -= dt;
       if (this._navTimer <= 0) { this._navTimer = 1; this._buildNav(ctx); }
@@ -319,6 +487,7 @@ export class AISystem {
     this.stats.alive = alive;
     this.stats.bots = this.bots.length;
     this.stats.paths = this.nav.stats.queries;
+    this._updateContacts(ctx);
   }
 
   // -------------------------------------------------------------- screenshot
@@ -349,10 +518,20 @@ export class AISystem {
     const right = _sRight.set(-fwd.z, 0, fwd.x);
     const floorY = this._groundY(eye.x, eye.z, eye.y - 1.7);
 
+    // Four DISTINGUISHABLE reads, not four copies of one asset: a crouched
+    // shooter, a runner at high port, a standing shooter turned across the
+    // frame, and a distant walker. Nothing is staged inside 11 m — the closer a
+    // procedural bot gets to camera the more it costs us — and nothing faces
+    // exactly PI any more, because that was the pose whose aim yaw saturated
+    // the animator's clamp and splayed the arms into a T.
     const plan = opts.plan || [
-      { depth: 9.0, side: -3.0, crouch: 1, speed: 0, stride: 0.30, face: 0.15, aimUp: 1.15 },
-      { depth: 13.5, side: 1.4, crouch: 0, speed: 1.9, stride: 0.80, lift: 0.15, face: -1.15, aimUp: 1.45 },
-      { depth: 19.5, side: -1.8, crouch: 0, speed: 0, stride: 0.36, face: Math.PI, aimUp: 1.55 },
+      { depth: 11.0, side: -3.2, crouch: 1, speed: 0, aiming: 1, stride: 0.28, face: 0.20, aimUp: 1.05 },
+      {
+        depth: 15.5, side: 1.6, crouch: 0, speed: 3.4, aiming: 0, stride: 0.92,
+        lift: 0.17, face: -1.10, carry: 'high-port', aimUp: 1.50,
+      },
+      { depth: 22.0, side: -2.0, crouch: 0, speed: 0, aiming: 1, stride: 0.34, face: 2.40, aimUp: 1.55 },
+      { depth: 31.0, side: 3.4, crouch: 0, speed: 1.6, aiming: 0, stride: 0.66, face: 1.20, aimUp: 1.40 },
     ];
 
     for (const p of plan) {
@@ -421,11 +600,18 @@ export class AISystem {
     bot.anim.frozen = true;
     bot.crouch = pose.crouch ?? 0;
     bot.aiming = pose.aiming ?? 1;
+    bot.carry = pose.carry ?? null;
     bot.speed = pose.speed ?? 0;
     bot.wantFire = false;
     bot.aimPoint.copy(aim);
     _v1.copy(bot.aimPoint).sub(bot.position);
     bot.aimYaw = Math.atan2(_v1.x, _v1.z);
+    // Same invariant a live bot maintains in `_face`: the torso never twists
+    // further than the arm solver can follow. A frozen bot never runs `_face`,
+    // so it has to be applied here or a staged pose can still reach a T.
+    const twist = bot.aimYaw - bot.yaw;
+    const rel = Math.atan2(Math.sin(twist), Math.cos(twist));
+    if (Math.abs(rel) > MAX_TWIST) bot.yaw += rel - Math.sign(rel) * MAX_TWIST;
     bot.velocity.set(Math.sin(bot.yaw) * bot.speed, 0, Math.cos(bot.yaw) * bot.speed);
 
     // Split the stance fore/aft along the facing so the pose reads as a stride
@@ -507,8 +693,12 @@ export class AISystem {
 
   dispose() {
     this.clear();
+    this.contactMesh?.geometry.dispose();
+    this.contactMesh?.material.dispose();
+    this.contactMesh = null;
     this.root?.removeFromParent();
     disposeRigGeometry();
+    disposeKitAtlas();
   }
 }
 
