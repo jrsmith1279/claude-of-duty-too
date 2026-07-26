@@ -120,7 +120,29 @@ export class WeaponSystem {
       ads: this.view.adsW,
       spread: this.recoil.spread,
       tris: this.view.model?.tris ?? 0,
+      draws: this.viewDrawCount(),
+      sight: this.sightNDC(),
     });
+  }
+
+  /**
+   * Screen position of the optical axis, in NDC. A misaligned sight is the
+   * most noticeable bug an FPS can have and eyeballing a screenshot is not
+   * good enough, so the alignment is measurable: under ADS this must read
+   * (0, 0) to within the breathing amplitude.
+   */
+  sightNDC() {
+    const n = this.view.model?.nodes?.sight;
+    if (!n) return null;
+    this.view.root.updateMatrixWorld(true);
+    _v.setFromMatrixPosition(n.matrixWorld).project(this.ctx.viewCamera);
+    return { x: +_v.x.toFixed(5), y: +_v.y.toFixed(5) };
+  }
+
+  viewDrawCount() {
+    let n = 0;
+    this.view.model?.root.traverse((o) => { if (o.isMesh && o.visible) n++; });
+    return n;
   }
 
   /** Jump the ADS transition to its end state for a deterministic screenshot. */
