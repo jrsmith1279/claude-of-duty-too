@@ -331,10 +331,13 @@ function window_(bs, g, fr, f, t, yc, ww, wh, rand, wallTint) {
       n++;
     }
   } else if (roll < 0.42) {
-    // Roller shutter, part way down.
-    jitterColor(_c, rand, 0.24, 0.07, 0.03);
+    // Roller shutter, part way down. Rusted stock rather than galvanised:
+    // metal_corrugated is metalness 1 at roughness 0.46 and in a shaded
+    // opening it mirrors the sky as a bright blue-white blind.
+    jitterColor(_c, rand, 0.24, 0.07, 0.06);
+    _c.multiplyScalar(0.85);
     const drop = 0.35 + rand() * 0.6;
-    put(bs, 'metal_corrugated', g.shutter, fr, f, t, yc + wh * (0.5 - drop / 2), -0.07,
+    put(bs, 'metal_rusted', g.shutter, fr, f, t, yc + wh * (0.5 - drop / 2), -0.07,
       ww * 0.98, wh * drop, 1, _c, false);
     n++;
   } else if (roll < 0.72) {

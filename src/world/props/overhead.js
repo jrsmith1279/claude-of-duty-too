@@ -182,26 +182,30 @@ export function awnings(ctx, site, bs, rand, density = 1) {
       jitterColor(_c, rand, 0.3, 0.08, 0.05);
       for (const s of [-1, 1]) {
         const ox = cx + ux * s * w * 0.45, oz = cz + uz * s * w * 0.45;
-        bs.add('metal_rusted', g.barOut, ox + f.nx * depth * 0.5, y - droop * 0.5,
-          oz + f.nz * depth * 0.5, 0.35, yaw, 0, 1, 1, depth * 1.12, _c, true);
+        bs.addPitched('metal_rusted', g.barOut, ox + f.nx * depth * 0.5, y - droop * 0.5,
+          oz + f.nz * depth * 0.5, yaw, Math.atan2(droop, depth), 0, 1, 1, depth * 1.12, _c, true);
         parts++;
       }
       bs.add('metal_rusted', g.barAlong, cx + f.nx * depth, y - droop,
         cz + f.nz * depth, 0, yaw, 0, w * 1.05, 1, 1, _c, true);
       parts++;
 
+      // The pitch has to be applied about the awning's own long axis, which is
+      // why these go through addPitched rather than add: the default XYZ Euler
+      // rotates about world X and stands the sheet on its edge on any wall that
+      // does not face along Z.
+      const pitch = -Math.PI / 2 + Math.atan2(droop, depth);
       if (metal) {
-        jitterColor(_c, rand, 0.24, 0.06, 0.04);
-        // Corrugated sheet, laid back against the wall and pitched forward.
-        bs.add('metal_corrugated', g.sheet, cx + f.nx * depth * 0.5, y - droop * 0.5,
-          cz + f.nz * depth * 0.5, -Math.PI / 2 + droop / depth, yaw, 0,
-          w, depth * 1.08, 1, _c, true);
+        jitterColor(_c, rand, 0.2, 0.05, 0.05);
+        _c.multiplyScalar(0.82);
+        bs.addPitched('metal_corrugated', g.sheet, cx + f.nx * depth * 0.5, y - droop * 0.5,
+          cz + f.nz * depth * 0.5, yaw, pitch, 0, w, depth * 1.08, 1, _c, true);
         parts++;
       } else {
         const cloth = clothGeo(w, depth * 1.15, droop * 1.6, rand, 0.16);
         jitterColor(_c, rand, 0.26, 0.28, 0.1);
-        bs.add('fabric_canvas', cloth, cx + f.nx * depth * 0.5, y - droop * 0.4,
-          cz + f.nz * depth * 0.5, -Math.PI / 2 + droop / depth, yaw, 0, 1, 1, 1, _c, true);
+        bs.addPitched('fabric_canvas', cloth, cx + f.nx * depth * 0.5, y - droop * 0.4,
+          cz + f.nz * depth * 0.5, yaw, pitch, 0, 1, 1, 1, _c, true);
         parts++;
         // A torn flap hanging off the front edge.
         if (rand() < 0.6) {

@@ -612,6 +612,23 @@ export class BatchSet {
     return this.addMatrix(matKey, geo, _m4, color, shadow);
   }
 
+  /**
+   * Adds with the rotation applied as yaw-then-pitch-then-roll (Euler `YXZ`).
+   *
+   * The default `XYZ` order rotates about *world* X after the yaw, which tips a
+   * wall-mounted part about the wrong axis on any facade that does not happen
+   * to face along Z — an awning pitched forward on an east wall ends up
+   * standing on its edge. Anything that needs both a facing and a pitch has to
+   * come through here.
+   */
+  addPitched(matKey, geo, x, y, z, yaw, pitch, roll, sx, sy = sx, sz = sx, color = null, shadow = false) {
+    if (!geo) return this;
+    _e.set(pitch, yaw, roll, 'YXZ');
+    _q.setFromEuler(_e);
+    _m4.compose(_v.set(x, y, z), _q, _s.set(sx, sy, sz));
+    return this.addMatrix(matKey, geo, _m4, color, shadow);
+  }
+
   /** Adds oriented so +Y maps onto `normal` — decals, wall-mounted parts. */
   addOriented(matKey, geo, x, y, z, normal, spin = 0, sx = 1, sy = sx, sz = sx, color = null, shadow = false) {
     _q.setFromUnitVectors(_up, normal);
