@@ -1,10 +1,11 @@
 import * as THREE from 'three';
-import { makeRng } from './props/lib.js';
+import { makeRng, Batch } from './props/lib.js';
 import { Site, BatchSet } from './props/layout.js';
 import { scatterGround, rubblePiles, wallDrifts, wallBerms } from './props/clutter.js';
-import { DecalKit, groundDecals, wallDecals, tyreTracks } from './props/decals.js';
+import { DecalKit, groundDecals, wallDecals, tyreTracks, hotspotDecals } from './props/decals.js';
 import { facadeDetail } from './props/facade.js';
 import { overheadLines, awnings, rooftops, fireEscape } from './props/overhead.js';
+import { streetFurniture } from './props/furniture.js';
 
 /**
  * Everything in the world that is not the building shell.
@@ -111,6 +112,9 @@ export class PropSystem {
     pieces += awnings(ctx, site, core, rand, 1).parts;
     pieces += overheadLines(ctx, site, core, rand, 1).parts;
     pieces += fireEscape(ctx, site, core, rand).parts;
+    const furniture = streetFurniture(ctx, site, core, rand, 1);
+    pieces += furniture.parts;
+    this._colliders = furniture.colliders;
     pieces += rubblePiles(ctx, site, core, rand, 1).pieces;
     pieces += wallDrifts(ctx, site, detail, rand, 1).pieces;
     pieces += wallBerms(ctx, site, core, rand, 1).pieces;
@@ -122,6 +126,7 @@ export class PropSystem {
     dec += groundDecals(ctx, site, decalSoft, decalHard, kit, rand, 1).count;
     dec += tyreTracks(ctx, site, decalHard, kit, rand, 1).count;
     dec += wallDecals(ctx, site, decalSoft, decalHard, kit, rand, 1).count;
+    dec += hotspotDecals(ctx, site, decalSoft, decalHard, kit, rand, furniture.hotspots).count;
 
     this.tiers[0] = core.build(ctx, this.root);
     this.tiers[1] = detail.build(ctx, this.root);
@@ -159,12 +164,32 @@ export class PropSystem {
    */
   _registerColliders(ctx) {
     const phys = ctx.physics;
-    if (!phys?.addStatic || !this._colliders.length) return;
+    if (!phys?.addStatic || !this._colliders?.length) return;
     const layer = phys.LAYER?.PROPS || 2;
+    // One merged soup per surface key, so a bullet still gets the right impact
+    // material without one addStatic call per crate.
+    const bySurface = new Map();
+    const unit = new THREE.BoxGeometry(1, 1, 1);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
     for (const c of this._colliders) {
-      const id = phys.addStatic(c.geo, c.matrix, { material: c.surface, mask: layer });
-      if (id > 0) this._staticId = id;
+      let b = bySurface.get(c.surface);
+      if (!b) { b = new Batch('collider:' + c.surface); bySurface.set(c.surface, b); }
+      e.set(0, c.yaw || 0, 0);
+      q.setFromEuler(e);
+      m.compose(new THREE.Vector3(c.x, c.y, c.z), q, new THREE.Vector3(c.w, c.h, c.d));
+      b.addMatrix(unit, m, null);
     }
+    this.staticIds = [];
+    for (const [surface, batch] of bySurface) {
+      const g = batch.build();
+      if (!g) continue;
+      const id = phys.addStatic(g, undefined, { material: surface, mask: layer });
+      if (id > 0) this.staticIds.push(id);
+      g.dispose();
+    }
+    unit.dispose();
     phys.buildStaticBVH?.();
   }
 

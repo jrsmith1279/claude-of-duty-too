@@ -732,3 +732,43 @@ export function wallDecals(ctx, site, soft, hard, kit, rand, density = 1) {
   }
   return { count };
 }
+
+/**
+ * Scorch and spill under the hero props. A burnt-out vehicle with clean tarmac
+ * beneath it is the single most obvious tell that a prop was dropped into a
+ * scene rather than having happened in it.
+ */
+export function hotspotDecals(ctx, site, soft, hard, kit, rand, hotspots) {
+  if (!kit.texture || !hotspots?.length) return { count: 0 };
+  let count = 0;
+  for (const hs of hotspots) {
+    for (let i = 0, n = 5 + ((rand() * 5) | 0); i < n; i++) {
+      const a = rand() * 6.2832;
+      const r = Math.sqrt(rand()) * hs.r;
+      const x = hs.x + Math.cos(a) * r, z = hs.z + Math.sin(a) * r;
+      const y = site.groundAt(x, z);
+      if (y === null) continue;
+      const kind = r < hs.r * 0.55 ? (rand() < 0.6 ? 'scorch' : 'oil') : 'scorch';
+      const w = (kind === 'oil' ? 0.6 : 1.4) * (0.7 + rand() * 0.9);
+      const geo = kit.geo(kind, rand);
+      if (!geo) continue;
+      onGround(soft, 'gun_polymer', geo, x, y, z, w, w * (0.7 + rand() * 0.6),
+        rand() * 6.2832, tint(rand, 0.1, 0));
+      count++;
+    }
+    // Fragments of blown glass read as a bright sparkle ring around a vehicle.
+    for (let i = 0, n = 3 + ((rand() * 4) | 0); i < n; i++) {
+      const a = rand() * 6.2832;
+      const r = hs.r * (0.5 + rand() * 0.6);
+      const x = hs.x + Math.cos(a) * r, z = hs.z + Math.sin(a) * r;
+      const y = site.groundAt(x, z);
+      if (y === null) continue;
+      const geo = kit.geo('impactSpray', rand);
+      if (!geo) continue;
+      onGround(hard, 'gun_polymer', geo, x, y, z, 0.9 + rand() * 0.8, 0.9 + rand() * 0.8,
+        rand() * 6.2832, tint(rand, 0.1, 0.05));
+      count++;
+    }
+  }
+  return { count };
+}
