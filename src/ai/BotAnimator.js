@@ -234,12 +234,15 @@ export class BotAnimator {
         const eo = 1 - (1 - t) * (1 - t);
         f.pos.lerpVectors(f.prev, f.target, eo);
         f.pos.y = THREE.MathUtils.lerp(f.prev.y, f.target.y, e) + Math.sin(Math.PI * t) * f.lift;
-        f.pitch = Math.sin(Math.PI * t) * (running ? 0.5 : 0.3) - (1 - t) * 0.06;
+        // Dorsiflex through the swing so the toe clears the ground, and land
+        // heel-first. Positive pitch is toe-down.
+        f.pitch = -Math.sin(Math.PI * t) * (running ? 0.42 : 0.26);
         continue;
       }
 
       f.pos.copy(f.plant);
-      f.pitch = damp(f.pitch, 0, 12, dt);
+      // Toe-off: `heel` is set by the hip solver when the leg runs out of reach.
+      f.pitch = damp(f.pitch, (f.heel || 0) * 0.62, 16, dt);
 
       // Step triggers. Either the gait says it is this foot's turn, or the foot
       // has been left too far behind — which is what produces a turn-in-place
@@ -277,20 +280,32 @@ export class BotAnimator {
     const speed = this.speedSmooth;
     const hipBase = THREE.MathUtils.lerp(STANCE.stand.hip, STANCE.crouch.hip, crouch);
 
-    // Hip height: the base stance, minus whatever the legs cannot reach. A hip
-    // that ignores foot height pops when a foot lands on a kerb.
-    let hipTarget = s.pos.y + hipBase;
-    for (const f of this.feet) {
-      if (f.swinging) continue;
-      const need = f.pos.y + ANKLE_Y + Math.sqrt(Math.max(LEG_MAX * LEG_MAX - HIP_HALF * HIP_HALF * 0.25, 0.04));
-      hipTarget = Math.min(hipTarget, need);
-      hipTarget = Math.max(hipTarget, f.pos.y + 0.45);
-    }
     // Gait bob: two dips per cycle (one per foot strike), sunk deeper the
     // faster the bot moves.
     const gait = this.phase * Math.PI * 2;
     const bobAmp = Math.min(0.012 + speed * 0.0125, 0.055) * (1 - crouch * 0.5);
-    hipTarget += -Math.abs(Math.sin(gait)) * bobAmp * 2 + bobAmp;
+    let hipTarget = s.pos.y + hipBase - Math.abs(Math.sin(gait)) * bobAmp * 2 + bobAmp;
+
+    // Hip height is then whatever the legs can actually reach. Two things do
+    // the work at full stride, and without both the ankle IK simply cannot
+    // touch its target and the foot floats:
+    //   - the pelvis drops, exactly as a real one does at double support;
+    //   - the trailing heel comes off the ground, which buys back ~8 cm of
+    //     reach and is the single most recognisable moment in a walk cycle.
+    const c = Math.cos(this.yaw), sn = Math.sin(this.yaw);
+    for (let pass = 0; pass < 2; pass++) {
+      for (const f of this.feet) {
+        if (f.swinging) { f.heel = 0; continue; }
+        const lx = f.side * HIP_HALF;
+        const jx = s.pos.x + c * lx, jz = s.pos.z - sn * lx;
+        const dxz = Math.hypot(f.pos.x - jx, f.pos.z - jz);
+        const vert = Math.sqrt(Math.max(LEG_MAX * LEG_MAX - dxz * dxz, 0.02));
+        let limit = f.pos.y + ANKLE_Y + vert + (REST.hips.y - REST.thighL.y);
+        f.heel = THREE.MathUtils.clamp((hipTarget - limit) / 0.11, 0, 1);
+        limit += f.heel * 0.088;
+        hipTarget = Math.min(hipTarget, Math.max(limit, f.pos.y + 0.46));
+      }
+    }
     this.hipSpring.step(hipTarget, dt);
 
     // Lean: forward into acceleration and speed, inward into a turn.

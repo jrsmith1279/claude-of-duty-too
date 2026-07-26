@@ -168,25 +168,25 @@ function pools() {
  *                   ground by a fraction of its own size instead of floating
  * */
 const KINDS = {
-  chunk: { key: 'rubble', value: 0.3, hue: 0.05, warm: 0.06, tone: 1.16, flat: 0.25, h: 0.2, shadow: 1 },
-  chunkBig: { key: 'rubble', value: 0.26, hue: 0.05, warm: 0.05, tone: 1.14, flat: 0.2, h: 0.42, shadow: 1 },
-  slab: { key: 'concrete_floor', value: 0.24, hue: 0.03, warm: 0.03, tone: 1.12, flat: 0.85, h: 0.1, shadow: 1 },
-  slabSmall: { key: 'concrete_floor', value: 0.26, hue: 0.04, warm: 0.03, tone: 1.12, flat: 0.8, h: 0.06, shadow: 1 },
-  brick: { key: 'brick', value: 0.3, hue: 0.09, warm: 0.1, tone: 1.08, flat: 0.55, h: 0.07, shadow: 0 },
-  brickHalf: { key: 'brick', value: 0.32, hue: 0.1, warm: 0.09, tone: 1.08, flat: 0.5, h: 0.07, shadow: 0 },
-  plaster: { key: 'plaster', value: 0.28, hue: 0.04, warm: 0.07, tone: 0.9, flat: 0.75, h: 0.09, shadow: 0 },
-  splinter: { key: 'wood_plank', value: 0.34, hue: 0.07, warm: 0.06, tone: 1.0, flat: 0.7, h: 0.05, shadow: 0 },
-  plank: { key: 'wood_plank', value: 0.3, hue: 0.07, warm: 0.05, tone: 1.0, flat: 0.9, h: 0.03, shadow: 0 },
-  card: { key: 'plywood', value: 0.3, hue: 0.06, warm: 0.07, tone: 0.94, flat: 0.92, h: 0.02, shadow: 0 },
-  paper: { key: 'plaster', value: 0.16, hue: 0.02, warm: 0.03, tone: 0.86, flat: 0.95, h: 0.01, shadow: 0 },
-  twist: { key: 'metal_rusted', value: 0.36, hue: 0.1, warm: 0.1, tone: 1.05, flat: 0.6, h: 0.04, shadow: 0 },
-  rebar: { key: 'metal_rusted', value: 0.34, hue: 0.09, warm: 0.09, tone: 1.0, flat: 0.75, h: 0.03, shadow: 0 },
+  chunk: { key: 'rubble', value: 0.3, hue: 0.05, warm: 0.06, tone: 1.34, flat: 0.25, h: 0.2, shadow: 1 },
+  chunkBig: { key: 'rubble', value: 0.26, hue: 0.05, warm: 0.05, tone: 1.30, flat: 0.2, h: 0.42, shadow: 1 },
+  slab: { key: 'concrete_floor', value: 0.24, hue: 0.03, warm: 0.03, tone: 1.26, flat: 0.85, h: 0.1, shadow: 1 },
+  slabSmall: { key: 'concrete_floor', value: 0.26, hue: 0.04, warm: 0.03, tone: 1.26, flat: 0.8, h: 0.06, shadow: 1 },
+  brick: { key: 'brick', value: 0.3, hue: 0.09, warm: 0.1, tone: 1.18, flat: 0.55, h: 0.07, shadow: 0 },
+  brickHalf: { key: 'brick', value: 0.32, hue: 0.1, warm: 0.09, tone: 1.18, flat: 0.5, h: 0.07, shadow: 0 },
+  plaster: { key: 'plaster', value: 0.28, hue: 0.04, warm: 0.07, tone: 1.05, flat: 0.75, h: 0.09, shadow: 0 },
+  splinter: { key: 'wood_plank', value: 0.34, hue: 0.07, warm: 0.06, tone: 1.1, flat: 0.7, h: 0.05, shadow: 0 },
+  plank: { key: 'wood_plank', value: 0.3, hue: 0.07, warm: 0.05, tone: 1.1, flat: 0.9, h: 0.03, shadow: 0 },
+  card: { key: 'plywood', value: 0.3, hue: 0.06, warm: 0.07, tone: 1.0, flat: 0.92, h: 0.02, shadow: 0 },
+  paper: { key: 'plaster', value: 0.16, hue: 0.02, warm: 0.03, tone: 0.95, flat: 0.95, h: 0.01, shadow: 0 },
+  twist: { key: 'metal_rusted', value: 0.36, hue: 0.1, warm: 0.1, tone: 1.14, flat: 0.6, h: 0.04, shadow: 0 },
+  rebar: { key: 'metal_rusted', value: 0.34, hue: 0.09, warm: 0.09, tone: 1.12, flat: 0.75, h: 0.03, shadow: 0 },
   can: { key: 'metal_painted', value: 0.42, hue: 0.22, warm: 0.0, tone: 1.0, flat: 0.8, h: 0.05, shadow: 0 },
-  tile: { key: 'tile_roof', value: 0.3, hue: 0.08, warm: 0.08, tone: 1.05, flat: 0.7, h: 0.05, shadow: 0 },
-  grit: { key: 'gravel', value: 0.3, hue: 0.04, warm: 0.04, tone: 1.1, flat: 0.4, h: 0.05, shadow: 0 },
-  pebble: { key: 'gravel', value: 0.3, hue: 0.05, warm: 0.04, tone: 1.1, flat: 0.4, h: 0.09, shadow: 0 },
-  mound: { key: 'rubble', value: 0.14, hue: 0.03, warm: 0.06, tone: 1.2, flat: 0.0, h: 1, shadow: 1 },
-  berm: { key: 'sand', value: 0.16, hue: 0.04, warm: 0.1, tone: 1.06, flat: 0.0, h: 1, shadow: 0 },
+  tile: { key: 'tile_roof', value: 0.3, hue: 0.08, warm: 0.08, tone: 1.16, flat: 0.7, h: 0.05, shadow: 0 },
+  grit: { key: 'gravel', value: 0.3, hue: 0.04, warm: 0.04, tone: 1.24, flat: 0.4, h: 0.05, shadow: 0 },
+  pebble: { key: 'gravel', value: 0.3, hue: 0.05, warm: 0.04, tone: 1.24, flat: 0.4, h: 0.09, shadow: 0 },
+  mound: { key: 'rubble', value: 0.14, hue: 0.03, warm: 0.06, tone: 1.32, flat: 0.0, h: 1, shadow: 1 },
+  berm: { key: 'sand', value: 0.16, hue: 0.04, warm: 0.1, tone: 1.16, flat: 0.0, h: 1, shadow: 0 },
 };
 
 /** Per-piece tint: jitter about the kind's base tone. */
@@ -238,7 +238,7 @@ export function scatterGround(ctx, site, bs, rand, density = 1) {
   const fine = site.field((d, corner, surf, x, z, indoor, step) =>
     gate(d) * (wallFalloff(d, 0.9, 0.05) + step * 6 + corner * 0.35));
   const mid = site.field((d, corner, surf, x, z, indoor, step) =>
-    gate(d) * (wallFalloff(d, 2.0, 0.16) + step * 3 + corner * 0.3 + (indoor ? 0.5 : 0)));
+    gate(d) * (wallFalloff(d, 2.4, 0.24) + step * 3 + corner * 0.3 + (indoor ? 0.5 : 0)));
   const litter = site.field((d, corner, surf, x, z, indoor, step) =>
     gate(d) * (wallFalloff(d, 1.1, 0.03) + step * 4 + corner * 0.8));
 
