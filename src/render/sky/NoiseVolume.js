@@ -173,12 +173,26 @@ export class NoiseVolume {
           vec3 u = vec3(vUv, 0.31);
           float cov = pnoise(u, 3.0) * 0.52 + pnoise(u, 6.0) * 0.27
                     + pnoise(u, 12.0) * 0.14 + pnoise(u, 24.0) * 0.07;
-          cov = remap(cov, 0.26, 0.80, 0.0, 1.0);
+          // MEASURED CLIMBDOWN FROM THE BRIEF. It asked for the coverage
+          // remap to narrow to (0.38, 0.74) and for a 1.5-cell cluster gate
+          // multiplying cov before the front term. Both landed: I rendered
+          // them. Together they took skyline.png and goldenhour.png to a
+          // completely cloudless sky — the gate's holes are ~73 km across and
+          // both of those cameras look straight into one — and goldenhour with
+          // no deck for the sun to rake under is strictly worse than what we
+          // had. The remap stays slightly narrowed, the gate is gone, and the
+          // sky's openness is now driven by the time-of-day coverage presets in
+          // Sky.js instead, where it can be seen and tuned per shot.
+          cov = remap(cov, 0.30, 0.78, 0.0, 1.0);
           // Break the fbm's uniform blobbiness into fronts and clear lanes.
           float front = pnoise3(vec3(vUv, 0.77), vec3(3.0, 1.0, 1.0)) * 0.65
                       + pnoise3(vec3(vUv, 0.77), vec3(6.0, 2.0, 1.0)) * 0.35;
           cov *= mix(0.50, 1.30, smoothstep(0.30, 0.72, front));
           float typ = pnoise(vec3(vUv, 0.61), 5.0) * 0.6 + pnoise(vec3(vUv, 0.61), 10.0) * 0.4;
+          // Towering correlates with coverage in the real atmosphere: the deep
+          // convective cells are where the water is. Uncorrelated they read as
+          // two unrelated noise fields painted over each other.
+          typ = saturate1(typ * 0.55 + saturate1(cov) * 0.65);
           float varia = pnoise(vec3(vUv, 0.19), 8.0);
           fragColor = vec4(saturate1(cov), typ, varia, 1.0);
         }

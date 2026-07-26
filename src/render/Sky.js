@@ -54,7 +54,10 @@ export class SkySystem {
     this._time = 0;
     this._cloudPhase = 0;
     this._lastFullCloud = -10;
+    // Null until something calls setCoverage(): with no explicit request the
+    // deck is driven off the clock instead, see _cloudPreset.
     this.coverage = 0.60;
+    this._userCoverage = null;
     this.windSpeed = 1.0;
   }
 
@@ -146,7 +149,12 @@ export class SkySystem {
       exposureScale: 1,
       /** Linear HDR sky radiance in a world direction (CPU, allocation free). */
       sample: (dir, target) => this._sampleRadiance(dir, target),
-      setCoverage: (v) => { this.coverage = THREE.MathUtils.clamp(v, 0, 1); this._dirty = true; },
+      setCoverage: (v) => {
+        this._userCoverage = THREE.MathUtils.clamp(v, 0, 1);
+        this.coverage = this._userCoverage;
+        this._dirty = true;
+        this._applyUniforms();
+      },
       setWindSpeed: (v) => { this.windSpeed = Math.max(0, v); },
       __sys: this,
     };
@@ -228,8 +236,15 @@ export class SkySystem {
 
     // Airglow (557.7 nm dominant) and sodium light pollution from the city.
     u.uAirglow.value.set(0.00055 * night, 0.00090 * night, 0.00110 * night);
-    u.uPollution.value.set(0.0115 * night, 0.0061 * night, 0.0024 * night);
-    u.uStarBrightness.value = 1.0;
+    // Neither night reference shows a single star: bo6_00's sky is a dull warm
+    // brown-black and bo6_06's is invisible behind sodium haze. Thirty large
+    // white dots on clean saturated blue was the strongest shader-demo tell in
+    // night.png. So: stars down to a quarter, sodium up by 2.6x, and (in
+    // SkyDome) the sodium term now decays with altitude so the glow hugs the
+    // bottom 20 degrees the way a real city's does instead of tinting the
+    // zenith. A city night sky is bright and empty, not dark and starry.
+    u.uPollution.value.set(0.0300 * night, 0.0160 * night, 0.0060 * night);
+    u.uStarBrightness.value = 0.28;
     u.uMoonSize.value = 2.0;
 
     // Ambient colours. Sampled from the same integral the dome uses, so the
@@ -261,9 +276,16 @@ export class SkySystem {
     cu.uSkyTop.value.set(this.skyColor.r, this.skyColor.g, this.skyColor.b);
     cu.uSkyBottom.value.set(this.groundColor.r, this.groundColor.g, this.groundColor.b);
     cu.uHaze.value.set(this.horizonColor.r, this.horizonColor.g, this.horizonColor.b);
+    // Cloud deck by time of day. A flat 0.60 all day was the wrong single
+    // number twice over: at noon it is too much sky for a clear map, and at a
+    // low sun it is not enough, because a grazing sun raking the underside of a
+    // 60% deck is the most expensive-looking sky available to us and we were
+    // never getting it.
+    const preset = this._cloudPreset(this.t01);
+    this.coverage = this._userCoverage ?? preset.coverage;
     cu.uCloudCoverage.value = this.coverage;
-    cu.uCloudDensity.value = 1.0;
-    cu.uCirrusAmount.value = this.ctx?.quality?.tier === 'low' ? 0.0 : 0.34;
+    cu.uCloudDensity.value = 1.35;
+    cu.uCirrusAmount.value = this.ctx?.quality?.tier === 'low' ? 0.0 : preset.cirrus;
 
     // Aerial perspective feed.
     AP.setSunDir(eph.sunDirection);
@@ -320,6 +342,21 @@ export class SkySystem {
       api.moonIntensity = eph.moonIntensity;
       api.moonPhase = eph.moonPhase;
     }
+  }
+
+  /**
+   * Cloud coverage and cirrus by clock, ramped over 0.03 of a day (~43 min) so
+   * a time-of-day slider never snaps the sky.
+   * @param {number} t01
+   */
+  _cloudPreset(t01) {
+    // Golden hour, both ends of the day. Heavier deck: this is the only window
+    // where the sun gets under the cloud base and lights it from below.
+    const gold = Math.max(band(t01, 0.70, 0.82, 0.03), band(t01, 0.06, 0.14, 0.03));
+    const night = band(t01, 0.82, 1.06, 0.03);
+    const coverage = 0.60 + gold * (0.78 - 0.60) + night * (0.70 - 0.60);
+    const cirrus = 0.50 + gold * (0.62 - 0.50) - night * 0.50 * 0.55;
+    return { coverage, cirrus };
   }
 
   _sampleRadiance(dir, target) {
@@ -445,4 +482,14 @@ export class SkySystem {
 function smoothstep(a, b, x) {
   const t = THREE.MathUtils.clamp((x - a) / (b - a), 0, 1);
   return t * t * (3 - 2 * t);
+}
+
+/**
+ * 1 inside [lo, hi) on the 0..1 day circle, ramped over `w` at both ends.
+ * Wraps, so a window that crosses midnight (0.82 -> 1.06) works.
+ */
+function band(t01, lo, hi, w) {
+  let t = t01;
+  if (hi > 1 && t < hi - 1) t += 1;
+  return smoothstep(lo - w, lo + w, t) * (1 - smoothstep(hi - w, hi + w, t));
 }

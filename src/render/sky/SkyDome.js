@@ -73,7 +73,12 @@ void main(){
   // Airglow brightens toward the limb (van Rhijn); sodium light pollution is
   // strictly a horizon phenomenon. Both are what keep a night sky off black.
   sky += uAirglow * (1.0 + 3.2 * pow(1.0 - up, 8.0));
-  sky += uPollution * pow(saturate1(1.0 - dir.y * 3.6), 5.0) * saturate1(1.0 + dir.y * 14.0);
+  // Sodium light pollution. The extra exp() is what makes it read as a city
+  // rather than as a global tint: a real sodium dome hugs the bottom 20 degrees
+  // and is gone by 30, because the light is scattered out of a source that is
+  // below you. Without it the glow reached halfway up the sky.
+  sky += uPollution * pow(saturate1(1.0 - dir.y * 3.6), 5.0) * saturate1(1.0 + dir.y * 14.0)
+       * exp(-max(dir.y, 0.0) * 4.5);
 
   if (uNight > 0.002){
     vec3 cdir = uStarRot * dir;

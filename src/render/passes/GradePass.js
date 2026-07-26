@@ -120,6 +120,18 @@ void main() {
     col.b -= chroma * amt * 0.22;
   }
 
+  // Quantisation dither, triangular PDF, +/- 1 LSB peak. A 3 km haze gradient
+  // across an 8-bit PNG bands, and none of the reference frames band. Placed
+  // AFTER the sRGB encode and the LUT rather than before them as the brief
+  // asked: 1/255 of *display-linear* becomes ~13/255 after the OETF's toe, so
+  // dithering upstream of the encode puts visible noise in every shadow. This
+  // is where the quantiser is, so this is where the dither belongs. The grain
+  // above already dithers where it is enabled, but it is level-dependent and
+  // fades toward white, which is exactly where a sky gradient bands.
+  vec2 dp = vUv * uResolution;
+  float d = ( hash12( dp + 0.5 ) + hash12( dp.yx * 1.37 + 7.31 ) - 1.0 ) / 255.0;
+  col += d * 0.5;
+
   fragColor = vec4( clamp( col, 0.0, 1.0 ), 1.0 );
 }
 `;
