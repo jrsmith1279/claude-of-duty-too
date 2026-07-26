@@ -390,56 +390,69 @@ function buildHead(b) {
   // Rear counterweight pouch: breaks the back of the profile, which otherwise
   // is a perfect circle and reads as a motorcycle helmet.
   b.add(rbox(0.112, 0.082, 0.052, 0.016), at(0, 1.726, -0.138), 'pouch', H, 1);
-  // Side rails.
+  // Side rails. Deliberately NOT on the polymer tile: at roughness 0.36 a
+  // 13 mm rail catches a hard specular from a low sun and reads as chrome.
   for (const s of [-1, 1]) {
-    b.add(rbox(0.013, 0.026, 0.128, 0.006), at(s * 0.118, 1.700, 0.012), 'helmetHard', H, 1);
-  }
-  // Three bungee cords laid crown-to-rear: they catch one specular line each
-  // and break up an otherwise perfectly smooth dome.
-  for (const i of [-1, 0, 1]) {
-    b.add(box(0.008, 0.006, 0.150), at(i * 0.046, 1.790 - Math.abs(i) * 0.016, -0.030, 0.62), 'shockCord', H, 1);
+    b.add(rbox(0.013, 0.026, 0.128, 0.006), at(s * 0.118, 1.700, 0.012), 'shockCord', H, 1);
   }
 
-  // NVG mount and the stowed-up bino. This mass stands 6.6 cm above the crown
-  // and 10 cm forward of the brow: 3 x 2 px of unmistakable profile at 26 m.
-  b.add(rbox(0.058, 0.048, 0.036, 0.010), at(0, 1.760, 0.118), 'helmetHard', H, 1);
-  b.add(rbox(0.026, 0.096, 0.024, 0.008), at(0, 1.826, 0.112, -0.30), 'helmetHard', H, 1);
-  b.add(rbox(0.086, 0.030, 0.040, 0.008), at(0, 1.874, 0.096), 'helmetHard', H, 1);
+  // NVG mount and the stowed-up bino. This mass stands 6.2 cm above the crown
+  // and 10 cm forward of the brow: 3 x 2 px of unmistakable profile at 26 m,
+  // and both bo6_03 operators wear theirs exactly here.
+  //
+  // Twice rebuilt against the render, both times for the same reason. At the
+  // briefed heights the arm and bridge stood 9 cm proud and read in profile as
+  // a claw hammer rather than as a bino; and on the polymer tile (roughness
+  // 0.36) the flat top of the arm blew out brighter than SUNLIT BRICK, which is
+  // the "broad specular blowout on the head" the brief forbids outright. Small
+  // hard parts on a head go on a matte tile. The objective lenses are the one
+  // authorised glint and they are 2 cm across.
+  b.add(rbox(0.058, 0.048, 0.036, 0.010), at(0, 1.752, 0.116), 'shockCord', H, 1);
+  b.add(rbox(0.026, 0.070, 0.024, 0.008), at(0, 1.796, 0.110, -0.30), 'shockCord', H, 1);
+  b.add(rbox(0.086, 0.030, 0.040, 0.008), at(0, 1.836, 0.094), 'shockCord', H, 1);
   for (const s of [-1, 1]) {
     b.add(new THREE.CylinderGeometry(0.023, 0.026, 0.070, 8),
-      at(s * 0.031, 1.878, 0.100, 1.35), 'polymer', H, 1);
+      at(s * 0.031, 1.840, 0.098, 1.35), 'shockCord', H, 1);
     // Objective lens. Points along the bell axis, which rotating x by 1.35
     // leaves at (0, cos, sin); a circle's normal is +Z, hence 1.35 - PI/2.
     b.add(new THREE.CircleGeometry(0.021, 8),
-      at(s * 0.031, 1.878 + 0.0077, 0.100 + 0.0342, 1.35 - Math.PI / 2), 'optic', H, 1);
+      at(s * 0.031, 1.840 + 0.0077, 0.098 + 0.0342, 1.35 - Math.PI / 2), 'optic', H, 1);
   }
 
   // Comms: ear cups take the head from 19 to 24 cm wide, which is a real
   // silhouette change, plus a headband arc and a boom mic. The mic is 15
   // triangles and reads as a black hairline against a bright wall.
+  // Every one of these is on a matte tile. A comms cup is an 8.6 cm disc that
+  // points straight at the sun for half of every turn, and on the rubber tile
+  // it rendered brighter than the sunlit stone behind it.
   for (const s of [-1, 1]) {
-    b.add(new THREE.CylinderGeometry(0.043, 0.043, 0.038, 10),
-      at(s * 0.104, 1.652, -0.004, 0, 0, Math.PI / 2), 'rubber', H, 1);
+    b.add(new THREE.CylinderGeometry(0.041, 0.041, 0.034, 10),
+      at(s * 0.104, 1.652, -0.004, 0, 0, Math.PI / 2), 'velcro', H, 1);
   }
   for (let i = 0; i < 6; i++) {
     const t = (i + 0.5) / 6;
     const a = Math.PI * t;
     b.add(box(0.022, 0.030, 0.024),
       at(-0.104 * Math.cos(a), 1.652 + 0.140 * Math.sin(a), -0.006, 0, 0, a - Math.PI / 2),
-      'polymer', H, 1);
+      'shockCord', H, 1);
   }
-  b.add(new THREE.CylinderGeometry(0.005, 0.004, 0.108, 5),
-    at(-0.086, 1.630, 0.060, 1.30, 0.34, 0), 'polymer', H, 1);
+  b.add(new THREE.CylinderGeometry(0.0038, 0.0032, 0.074, 5),
+    at(-0.092, 1.632, 0.046, 1.30, 0.34, 0), 'velcro', H, 1);
 
   // Chin Y-yoke, two members down to the jaw.
   for (const s of [-1, 1]) {
     b.add(box(0.014, 0.078, 0.014), at(s * 0.072, 1.598, 0.030, -0.34, 0, s * 0.42), 'webbing', H, 1);
   }
 
-  // Eye-pro band: roughness 0.10 via the optic-glass tile, so it gives ONE
-  // narrow specular line at eye level. The block this replaces was a
-  // half-metallic slab that blew out to a white face plate in sunlight.
-  b.add(rbox(0.168, 0.042, 0.026, 0.010), at(0, 1.666, 0.098), 'eyePro', H, 1);
+  // Eye-pro. A matte frame carrying a NARROW lens strip, and the split is the
+  // whole point: the first version put the full 16.8 x 4.2 cm panel on the
+  // optic tile at roughness 0.12, and a flat near-mirror that size facing a low
+  // sun lit up end to end — the white face plate, reborn with a different
+  // material. The lens is now 1.6 cm tall and almost entirely fillet, so there
+  // is barely any planar area to catch the sun and what does catch it is one
+  // thin horizontal line, which is what eye-pro actually looks like.
+  b.add(rbox(0.172, 0.046, 0.026, 0.010), at(0, 1.664, 0.096), 'rubber', H, 1);
+  b.add(rbox(0.150, 0.016, 0.020, 0.008), at(0, 1.668, 0.104), 'eyePro', H, 1);
   // The face. One flat quad, recessed behind both the band and the brim so it
   // lives permanently in the brim's own shadow. No eyes, no slit, no nose, no
   // mouth, no normal detail — mw3_05's operator is a featureless void at 28 m.

@@ -185,7 +185,33 @@ export class AISystem {
       ? m.lib.get('bot_kit', { vertexColors: true, color: tint })
       : m.lib.get('rubber', { vertexColors: true, color: tint, roughness: 0.55, metalness: 0.0 });
     m.cache.set(index, mat);
+    this._killAtlasDetail();
     return mat;
+  }
+
+  /**
+   * Switch off SurfaceShader's detail-normal pass on the kit material.
+   *
+   * That pass re-tiles the normal map at 10x uv and reorients it onto the base
+   * normal, which is exactly right for a tiling surface and exactly wrong for
+   * an atlas: at 10x uv every fragment picks up whichever unrelated tile it
+   * lands in. On the trousers it came out as a 1.2 cm cross-hatch of hard
+   * specular scales — the operator's legs looked like chainmail in direct sun.
+   * The base normal map at 256 px across a 30 cm panel already carries all the
+   * weave anyone can see at 15-40 m.
+   *
+   * The uniform object is shared between the base material and its variants,
+   * and nothing but a bot ever asks for `bot_kit`, so this is local. It has to
+   * be re-asserted because `_configure` writes the def value back when a
+   * texture arrives late in the retry window.
+   */
+  _killAtlasDetail() {
+    const m = this.materials;
+    if (!m || m.key !== 'bot_kit') return;
+    for (const mat of m.cache.values()) {
+      const u = mat.codUniforms?.codSurface;
+      if (u && u.value.y !== 0) u.value.y = 0;
+    }
   }
 
   /**
@@ -487,6 +513,7 @@ export class AISystem {
     this.stats.alive = alive;
     this.stats.bots = this.bots.length;
     this.stats.paths = this.nav.stats.queries;
+    this._killAtlasDetail();
     this._updateContacts(ctx);
   }
 
