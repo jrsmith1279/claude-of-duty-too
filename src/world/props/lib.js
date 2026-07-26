@@ -416,13 +416,14 @@ export function corrugatedGeo(w, h, ribs = 14, depth = 0.02) {
  */
 export function clothGeo(w, h, sag, rand, torn = 0.0) {
   // One fold per ~22 cm of width, never fewer than three.
-  const k = Math.max(3, Math.round(w / 0.22));
+  let k = Math.max(3, Math.round(w / 0.22));
   // 14 columns is the floor, not the answer. The hem scallop runs at twice the
   // fold frequency, so a 2.5 m canopy wants k = 11 and 22 scallops across it;
   // sampled on 14 columns that is well past Nyquist and the sheet comes out as
   // an aliased bunting sawtooth instead of cloth — verified in street.png
   // before this clamp went in. Four columns per fold keeps the crests round.
-  const nx = Math.max(14, k * 4), ny = 10;
+  const nx = Math.min(28, Math.max(14, k * 4)), ny = 10;
+  k = Math.min(k, Math.floor(nx / 4));
   const geo = new THREE.PlaneGeometry(w, h, nx, ny);
   const pos = geo.attributes.position;
   const ph = rand() * 10;
