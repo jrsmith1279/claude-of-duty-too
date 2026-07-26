@@ -82,12 +82,13 @@ export class SkySystem {
     this.fog = new THREE.FogExp2(0x8fa8c0, 0.0045);
     ctx.scene.fog = this.fog;
     AP.enabled = true;
-    AP.density = 0.0011;
+    AP.density = 0.0052;
     AP.heightFalloff = 0.011;
-    AP.maxOpacity = 0.82;
+    AP.maxOpacity = 0.85;
     AP.anisotropy = 0.62;
-    AP.startDistance = 0;
+    AP.startDistance = 3;
     AP.referenceHeight = 0;
+    AP.groundFalloff = 0.40;
 
     this.cubeTarget = new THREE.WebGLCubeRenderTarget(tier.cube, {
       type: THREE.HalfFloatType,
@@ -266,7 +267,15 @@ export class SkySystem {
       eph.sunIrradiance.r * inscatter, eph.sunIrradiance.g * inscatter, eph.sunIrradiance.b * inscatter,
     );
     AP.setSunColor(_c2);
-    AP.density = 0.00110 + 0.00080 * (1 - eph.intensity);
+    // Zenith end of the inscatter gradient. Slightly muted from the true dome
+    // radiance so haze against sky still separates from the sky itself.
+    _c.copy(this.skyColor).multiplyScalar(0.90);
+    AP.setZenithColor(_c);
+    // ART_DIRECTION.md wants heavy airborne dust: visibly desaturated and
+    // lifted blacks past 40 m. At 0.0052/m that is ~19% opacity at 40 m, ~30%
+    // at 70 m (the market street's long sightline) and ~0.6 at 200 m, which
+    // reads as three depth planes without erasing the far one.
+    AP.density = 0.00520 + 0.00230 * (1 - eph.intensity);
     AP.heightFalloff = 0.011;
 
     // Fallback colour for anything that misses the shared uniform.

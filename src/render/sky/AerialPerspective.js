@@ -16,7 +16,7 @@ import * as THREE from 'three';
  * the uniform read zeroes and fall back to stock fog automatically.
  */
 
-const AP_SIZE = 16;
+const AP_SIZE = 20;
 const params = new Float32Array(AP_SIZE);
 
 export const AP = {
@@ -30,8 +30,13 @@ export const AP = {
   set anisotropy(v) { params[7] = v; },
   setSunColor(c) { params[8] = c.r; params[9] = c.g; params[10] = c.b; },
   set startDistance(v) { params[11] = v; },
+  /** Inscatter colour looking at the horizon. */
   setAmbientColor(c) { params[12] = c.r; params[13] = c.g; params[14] = c.b; },
   set referenceHeight(v) { params[15] = v; },
+  /** Inscatter colour looking at the zenith; the shader blends by view elevation. */
+  setZenithColor(c) { params[16] = c.r; params[17] = c.g; params[18] = c.b; },
+  /** How far the inscatter darkens looking down into the ground-bounce hemisphere. */
+  set groundFalloff(v) { params[19] = v; },
   array: params,
 };
 
@@ -61,7 +66,7 @@ const FOG_PARS_FRAGMENT = /* glsl */ `
     uniform float fogFar;
   #endif
 
-  uniform vec4 apParams[4];
+  uniform vec4 apParams[5];
 
   float apHG(float c, float g){
     float g2 = g * g;
@@ -90,7 +95,13 @@ const FOG_FRAGMENT = /* glsl */ `
     float apTau = apOpticalDepth(apY0, apY1, apDist, apParams[0].y, apParams[0].z, apParams[3].w);
     float apF = (1.0 - exp(-apTau)) * apParams[0].w;
     float apPhase = 12.566371 * apHG(dot(apDirW, apParams[1].xyz), apParams[1].w);
-    vec3 apIn = apParams[3].xyz + apParams[2].xyz * apPhase;
+    // Inscatter is the sky *in the view direction*, not one flat grey: horizon
+    // colour along the ground, zenith colour looking up, and a darker
+    // ground-bounce term looking down. A constant makes every distance read as
+    // the same sheet of white and kills the depth cue the haze exists to give.
+    vec3 apSky = mix( apParams[3].xyz, apParams[4].xyz, smoothstep( 0.0, 0.62, apDirW.y ) );
+    apSky *= mix( apParams[4].w, 1.0, smoothstep( -0.30, 0.015, apDirW.y ) );
+    vec3 apIn = apSky + apParams[2].xyz * apPhase;
     gl_FragColor.rgb = gl_FragColor.rgb * (1.0 - apF) + apIn * apF;
   } else {
     #ifdef FOG_EXP2
