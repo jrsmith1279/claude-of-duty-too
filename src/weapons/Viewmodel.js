@@ -33,13 +33,22 @@ const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 
-/** Reload choreography, shared by every weapon: (t01, pos, rot-in-degrees). */
+/**
+ * Reload choreography, shared by every weapon: (t01, pos, rot-in-degrees).
+ *
+ * The weapon comes *in and up*, not down. The hip pose already sits on the
+ * bottom edge of the frame, so an authored "lower the weapon" translation
+ * simply posts the whole animation off-screen — which is what the first pass
+ * did. Modern Call of Duty brings the receiver toward the middle of the frame
+ * and rolls the magwell over to face the camera; the sense of lowering comes
+ * from the muzzle pitching down, not from the weapon dropping.
+ */
 const RELOAD_KEYS = [
   [0.00, 0, 0, 0, 0, 0, 0],
-  [0.16, -0.010, -0.020, 0.012, -12, 15, -11],
-  [0.34, -0.014, -0.028, 0.016, -16, 21, -16],
-  [0.62, -0.012, -0.025, 0.014, -15, 19, -15],
-  [0.82, -0.006, -0.014, 0.008, -8, 11, -8],
+  [0.16, -0.024, 0.012, 0.020, -10, 16, -12],
+  [0.34, -0.034, 0.021, 0.028, -14, 23, -18],
+  [0.62, -0.030, 0.018, 0.025, -13, 21, -17],
+  [0.82, -0.014, 0.008, 0.012, -7, 12, -9],
   [1.00, 0, 0, 0, 0, 0, 0],
 ];
 

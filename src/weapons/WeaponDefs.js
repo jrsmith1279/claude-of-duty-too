@@ -53,9 +53,9 @@ export const GUN_MATERIALS = {
   wood: ['gun_wood', { uvScale: 5, envMapIntensity: 0.6 }],
   brass: ['gun_metal', { uvScale: 12, roughness: 0.34, color: 0xc79a4c, metalness: 1, envMapIntensity: 0.7 }],
   // Nomex glove — dark, matte, sheened fabric. Deliberately not skin.
-  glove: ['fabric_canvas', { uvScale: 22, roughness: 0.92, color: 0x212420, envMapIntensity: 0.35 }],
+  glove: ['fabric_canvas', { uvScale: 22, roughness: 0.92, color: 0x1d201c, envMapIntensity: 0.30, sheen: 0.10, sheenColor: 0x2e3129, sheenRoughness: 0.9 }],
   glove_pad: ['rubber', { uvScale: 12, color: 0x44473f, envMapIntensity: 0.35 }],
-  sleeve: ['fabric_canvas', { uvScale: 20, roughness: 0.95, color: 0x3c3b2d, envMapIntensity: 0.3 }],
+  sleeve: ['fabric_canvas', { uvScale: 20, roughness: 0.95, color: 0x33322a, envMapIntensity: 0.25, sheen: 0.10, sheenColor: 0x3b3a30, sheenRoughness: 0.92 }],
 };
 
 /** Cached `key -> THREE.Material` resolver bound to a material library. */
