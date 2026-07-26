@@ -39,6 +39,7 @@ const LOOKS = {
     highlightTint: [0.010, 0.005, -0.004],
     splitStrength: 1.0,
     otBoost: 0.0,
+    shoulder: 0.0,
     blackLift: 0.012,
     whiteCut: 0.0,
   },
@@ -60,9 +61,13 @@ const LOOKS = {
     highlightTint: [0.050, 0.021, -0.038],
     splitStrength: 1.0,
     otBoost: 0.42,
+    // Soft print shoulder instead of a hard white cut, so the sky can still go
+    // bright while sunlit concrete keeps tonal separation at the top.
+    shoulder: 0.30,
+    shoulderStart: 0.70,
     // ART_DIRECTION.md: the toe must not clip before ~0.02. Never pure #000.
     blackLift: 0.022,
-    whiteCut: 0.005,
+    whiteCut: 0.0,
   },
   cold_urban: {
     wb: [0.936, 0.988, 1.078],
@@ -79,8 +84,10 @@ const LOOKS = {
     highlightTint: [0.006, 0.012, 0.018],
     splitStrength: 1.0,
     otBoost: 0.20,
+    shoulder: 0.26,
+    shoulderStart: 0.70,
     blackLift: 0.022,
-    whiteCut: 0.014,
+    whiteCut: 0.0,
   },
   night_teal: {
     wb: [0.888, 0.976, 1.145],
@@ -99,8 +106,10 @@ const LOOKS = {
     // Night is already two temperatures — moon blue against sodium orange —
     // so it wants the axis boost too, just gentler than daylight.
     otBoost: 0.30,
+    shoulder: 0.18,
+    shoulderStart: 0.74,
     blackLift: 0.030,
-    whiteCut: 0.006,
+    whiteCut: 0.0,
   },
 };
 
@@ -110,6 +119,25 @@ const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const srgbToLin = (c) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
 const linToSrgb = (c) => (c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055);
 const lum = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
+
+/**
+ * Print shoulder. A Reinhard knee above `start`: unit slope where it joins, then
+ * a smooth compression so the top of the range is approached asymptotically and
+ * never actually reached.
+ *
+ * ART_DIRECTION.md: "Highlight rolloff must be soft. Blown sky is fine and
+ * correct; blown concrete is not." Measured against `refs/`, real Call of Duty
+ * daylight frames put p95 at 150-225 and p99 at 197-242; without a shoulder ours
+ * sat at 243-247 / 246-250, i.e. several percent of every frame pinned flat
+ * against the ceiling with no tonal separation left in it. This is the curve
+ * that buys that separation back.
+ */
+function shoulder(x, start, k) {
+  if (k <= 0 || x <= start) return x;
+  const span = 1 - start;
+  const t = (x - start) / span;
+  return start + span * (t / (1 + k * t));
+}
 
 function sCurve(x, amount, pivot) {
   const t = clamp01(x);
@@ -183,6 +211,14 @@ function bake(look, out) {
           dr += OT_AXIS[0] * k;
           dg += OT_AXIS[1] * k;
           db += OT_AXIS[2] * k;
+        }
+
+        const sk = look.shoulder || 0;
+        if (sk > 0) {
+          const ss = look.shoulderStart ?? 0.70;
+          dr = shoulder(clamp01(dr), ss, sk);
+          dg = shoulder(clamp01(dg), ss, sk);
+          db = shoulder(clamp01(db), ss, sk);
         }
 
         const span = 1 - look.blackLift - look.whiteCut;
