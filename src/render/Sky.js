@@ -379,8 +379,12 @@ export class SkySystem {
 
     const envMap = this.pmremTarget.texture;
     ctx.scene.environment = envMap;
-    ctx.scene.background = this.cubeTarget.texture;
-    ctx.scene.backgroundIntensity = 1;
+    // Deliberately NOT `scene.background`. The dome is a camera-locked box with
+    // depthTest off at renderOrder -1000, so it already covers every pixel; a
+    // scene background would be a second full-screen pass that is then entirely
+    // overdrawn. The cube is still published as `ctx.sky.cubeMap` for anything
+    // that wants to sample it.
+    ctx.scene.background = null;
     ctx.scene.environmentIntensity = 1;
     if (ctx.sky) ctx.sky.envMap = envMap;
     // The texture factory may expose envMap as a getter that proxies ctx.sky.

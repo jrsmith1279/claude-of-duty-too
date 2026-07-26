@@ -16,11 +16,23 @@ import { IndirectLight } from './lighting/Indirect.js';
  * alongside) this one; the level's fixtures are picked up on `engine:ready`.
  */
 
+// Fallback peak, used only when `ctx.sky` is missing or publishes no radiometry.
+// With a live sky the key light is derived from its published irradiance instead
+// (see `_updateKey`), because the two must agree: the dome, the PMREM probe and
+// the aerial-perspective inscatter are all authored in `ctx.sky.exposure` units,
+// and a directional light on a different scale means the sky and the ground it
+// lights are exposed against each other. Measured before this was wired up: the
+// sun delivered 2.84 while the dome assumed 21.1 — 2.9 stops apart, which is why
+// auto-exposure keyed to the ground and clipped the sky to flat white.
 const SUN_PEAK = 3.7;
 // Moonlight is really ~1/400,000 of sunlight. Every shooter cheats it up to
 // roughly a stop below "readable" so a night map is playable and silhouettes
 // still read; 1/9 of the sun is the usual neighbourhood.
 const MOON_PEAK = 0.78;
+/** Luminance of a linear colour, for renormalising a peak-normalised light tint. */
+function lum(c) {
+  return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+}
 
 const SUN_RAMP = [
   [-0.02, 0xff5f22],
@@ -355,10 +367,25 @@ export class LightingSystem {
 
     const y = _sunDir.y;
     const day = THREE.MathUtils.smoothstep(y, -0.055, 0.075);
-    this.sunIntensity = SUN_PEAK * Math.pow(THREE.MathUtils.clamp(y, 0, 1), 0.35) * day;
 
     if (sky?.sunColor?.isColor && day > 0.02) _sunColor.copy(sky.sunColor);
     else sunRamp(y, _sunColor);
+
+    // Radiometric key. `sky.sunIntensity` is the luminance of the extraterrestrial
+    // spectrum after the slant optical depth, in the same normalised units the
+    // dome integrates; `sky.exposure` converts those to scene-linear. That product
+    // is the irradiance on a surface facing the sun, which is exactly what
+    // three's DirectionalLight.intensity means — so the two systems agree by
+    // construction and the elevation ramp comes from real airmass rather than a
+    // curve. `sunColor` is peak-normalised, so divide its luminance back out or a
+    // reddened sun would also read as a dimmer one.
+    const skyExposure = sky?.exposure;
+    const skyIrradiance = sky?.sunIntensity;
+    if (Number.isFinite(skyExposure) && Number.isFinite(skyIrradiance) && skyExposure > 0) {
+      this.sunIntensity = (skyIrradiance * skyExposure * day) / Math.max(lum(_sunColor), 0.05);
+    } else {
+      this.sunIntensity = SUN_PEAK * Math.pow(THREE.MathUtils.clamp(y, 0, 1), 0.35) * day;
+    }
 
     const night = 1 - THREE.MathUtils.smoothstep(y, -0.1, 0.06);
     this.moonFactor = night;

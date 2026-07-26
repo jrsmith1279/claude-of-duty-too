@@ -44,7 +44,11 @@ export const SHOTS = {
   weapon:        { pos: [2.2, 1.68, 14], look: [2.2, 1.6, 0], fov: 70, tod: 0.32, desc: 'Viewmodel hip-fire framing', viewmodel: true },
   ads:           { pos: [2.2, 1.68, 14], look: [2.2, 1.6, 0], fov: 45, tod: 0.32, desc: 'Aim-down-sights framing', viewmodel: true, ads: true },
   materials:     { pos: [-4, 1.5, -18],  look: [-4, 1.4, -26], fov: 60, tod: 0.32, desc: 'Close-up on wall/ground material detail' },
-  goldenhour:    { pos: [26, 9.5, 34],   look: [0, 3, 0],     fov: 55, tod: 0.09, desc: 'Low-sun golden hour, long shadows, volumetrics' },
+  // tod 0.76 is ~30 min before the ephemeris sunset at 0.781, i.e. the sun a few
+  // degrees up. The preset used to say 0.09, which under the contract's anchors
+  // (0 = midnight, 0.5 = noon) is 02:10 — full night, and it was rendering as a
+  // moonlit pre-dawn while being reviewed as a golden-hour shot.
+  goldenhour:    { pos: [26, 9.5, 34],   look: [0, 3, 0],     fov: 55, tod: 0.76, desc: 'Low-sun golden hour, long shadows, volumetrics' },
   night:         { pos: [2.2, 1.68, 22], look: [1, 1.5, -10], fov: 70, tod: 0.85, desc: 'Night lighting, artificial lights, bloom' },
   skyline:       { pos: [8, 2.0, 30],    look: [-6, 14, -30], fov: 65, tod: 0.32, desc: 'Sky, clouds, aerial perspective' },
   combat:        { pos: [6, 1.7, 6],     look: [-8, 1.6, -12], fov: 70, tod: 0.32, desc: 'Combat framing with AI and FX', viewmodel: true, action: true },

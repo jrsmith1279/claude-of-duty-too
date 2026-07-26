@@ -43,11 +43,17 @@ await engine.init();
 engine.start();
 
 // Debug/automation surface used by tools/shoot.mjs and the visual critic loop.
-window.__COD__ = {
+//
+// Assigned into whatever is already there rather than over it: systems attach
+// their own hooks during init() (showTextureSheet, setWetness, lighting,
+// postfx, ...), and replacing the object wholesale silently dropped every one
+// of them. Each of those systems had independently grown a re-attach-on-update
+// workaround for exactly this; merging removes the need for all of them.
+const api = (window.__COD__ = window.__COD__ || {});
+Object.assign(api, {
   engine,
   ctx: engine.ctx,
   THREE_READY: true,
-  get stats() { return engine.stats; },
   setCamera(pos, look, fov) {
     const cam = engine.ctx.camera;
     cam.position.set(pos[0], pos[1], pos[2]);
@@ -58,5 +64,9 @@ window.__COD__ = {
   releaseCamera() { engine.bus.emit('camera:override', false); },
   setTimeOfDay(t) { engine.bus.emit('sky:timeOfDay', t); },
   pause(v = true) { engine.paused = v; },
-};
+});
+Object.defineProperty(api, 'stats', {
+  configurable: true,
+  get() { return engine.stats; },
+});
 window.__READY__ = true;

@@ -127,6 +127,9 @@ export class Engine {
   }
 }
 
+/** Integrated GPUs: fast, but not "run every pass at maximum" fast. */
+const INTEGRATED_GPU = /Apple M\d|Apple GPU|Intel|UHD Graphics|Iris|Radeon Vega|Mali|Adreno|PowerVR|SwiftShader|llvmpipe/i;
+
 function detectQuality() {
   const gl = document.createElement('canvas').getContext('webgl2');
   const debugInfo = gl?.getExtension('WEBGL_debug_renderer_info');
@@ -134,7 +137,16 @@ function detectQuality() {
   const mem = navigator.deviceMemory || 8;
   const cores = navigator.hardwareConcurrency || 8;
   const mobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
-  const tier = mobile ? 'low' : mem >= 8 && cores >= 8 ? 'ultra' : mem >= 4 ? 'high' : 'medium';
+  // deviceMemory/hardwareConcurrency alone put every modern laptop on `ultra`,
+  // which is a discrete-GPU preset: 2048-square hero textures, 8-step GTAO,
+  // 32-step volumetrics, 24-step POM. Measured on the M2 that is 26 ms/frame at
+  // 1080p against a 16.6 ms budget. The renderer string is already being read
+  // here, so use it: integrated parts top out at `high`.
+  const integrated = INTEGRATED_GPU.test(renderer);
+  const tier = mobile
+    ? 'low'
+    : mem >= 8 && cores >= 8 && !integrated ? 'ultra'
+      : mem >= 4 ? 'high' : 'medium';
   const presets = {
     low: { maxDpr: 1, shadowMapSize: 1024, cascades: 2, ssao: false, ssr: false, volumetrics: false, taa: false, textureSize: 512, anisotropy: 4 },
     medium: { maxDpr: 1.25, shadowMapSize: 1536, cascades: 3, ssao: true, ssr: false, volumetrics: true, taa: true, textureSize: 1024, anisotropy: 8 },
