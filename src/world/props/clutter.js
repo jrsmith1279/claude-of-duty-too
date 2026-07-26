@@ -442,7 +442,7 @@ export function wallBerms(ctx, site, bs, rand, density = 1) {
       tintFor('berm', rand);
       // Long axis follows the wall, short axis rolls out into the street.
       const along = Math.atan2(ux, uz);
-      bs.add(rand() < 0.55 ? 'sand' : 'dirt', pick(P.mound, rand),
+      bs.add('dirt', pick(P.mound, rand),
         x, y + h * 0.1, z, 0, along, 0,
         r * (1.1 + rand() * 1.4), h * 1.9, r * 0.72, _c, false);
       pieces++;

@@ -29,8 +29,8 @@ const FAMILY = {
   concrete: { thud: [95, 0.055, 0.55], mid: [1250, 1.1, 0.035, 0.55], click: [5200, 0.006, 0.30], grains: 0, ring: 0, damp: 1 },
   asphalt: { thud: [80, 0.065, 0.60], mid: [820, 0.9, 0.045, 0.50], click: [3800, 0.008, 0.18], grains: 0, ring: 0, damp: 0.9 },
   gravel: { thud: [110, 0.040, 0.40], mid: [1500, 0.9, 0.030, 0.38], click: [6200, 0.005, 0.28], grains: 7, grainF: 4200, ring: 0, damp: 1.05 },
-  dirt: { thud: [72, 0.075, 0.55], mid: [430, 0.8, 0.055, 0.42], click: [2200, 0.010, 0.08], grains: 3, grainF: 2400, ring: 0, damp: 0.55 },
-  sand: { thud: [64, 0.085, 0.42], mid: [300, 0.7, 0.070, 0.34], click: [1600, 0.014, 0.05], grains: 4, grainF: 1800, ring: 0, damp: 0.4 },
+  dirt: { thud: [72, 0.075, 0.55], mid: [430, 0.8, 0.055, 0.42], click: [2200, 0.010, 0.08], grains: 3, grainF: 2400, ring: 0, damp: 0.75 },
+  sand: { thud: [64, 0.085, 0.42], mid: [300, 0.7, 0.070, 0.34], click: [1600, 0.014, 0.05], grains: 4, grainF: 1800, ring: 0, damp: 0.58 },
   wood: { thud: [130, 0.050, 0.50], mid: [560, 1.4, 0.048, 0.60], click: [3400, 0.007, 0.24], grains: 0, ring: [340, 14, 0.13, 0.34], damp: 1.15 },
   metal: { thud: [150, 0.035, 0.40], mid: [1800, 1.6, 0.030, 0.62], click: [7400, 0.005, 0.40], grains: 0, ring: [1240, 30, 0.34, 0.55], damp: 1.45 },
   glass: { thud: [220, 0.020, 0.16], mid: [4200, 2.0, 0.022, 0.42], click: [9000, 0.004, 0.42], grains: 9, grainF: 7200, ring: [3300, 34, 0.20, 0.30], damp: 1.2 },
@@ -440,7 +440,7 @@ export function reload(g, stage, weaponId, o = {}) {
 export function playerHurt(g, amount = 20) {
   const ac = g.ac;
   const level = clamp(0.3 + amount / 60, 0.25, 1);
-  const route = g.local({ bus: 'foley', gain: level * 0.9, send: 0.1 });
+  const route = g.local({ bus: 'foley', gain: level * 2.6, send: 0.1 });
   if (!route) return;
   const t = route.when;
   surfaceBody(g, ac, route.input, t, 'flesh', { hard: 1.2, bright: 0.7, level: level * 1.4 });

@@ -88,13 +88,17 @@ export class PropSystem {
     this.stats.rays = site.rayCount;
 
     // Tier 0 is the frame; tiers 1 and 2 are shed by setDensity in that order.
+    // Only the core tier is worth splitting spatially and worth casting
+    // shadows: it holds the readable silhouettes. Gravel and litter are merged
+    // whole-map and never cast — 3 cascade draws for a 4 cm stone is the
+    // definition of a bad trade against a 350 draw budget.
     const core = new BatchSet('core');
-    const detail = new BatchSet('detail');
-    const fine = new BatchSet('fine');
+    const detail = new BatchSet('detail', Infinity, false);
+    const fine = new BatchSet('fine', Infinity, false);
     // Decals get their own set: they need a different material configuration
     // (blended, depth-write off, polygon-offset) and a render order after the
     // opaque props they sit on.
-    const decals = new BatchSet('decal');
+    const decals = new BatchSet('decal', Infinity, false);
 
     let pieces = 0;
     pieces += rubblePiles(ctx, site, core, rand, 1).pieces;

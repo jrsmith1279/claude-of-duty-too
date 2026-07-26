@@ -296,10 +296,21 @@ export function distantReport(g, sig, o, dist, t0) {
  * Voices are torn down on a timer rather than on the last node's `onended`,
  * because the send gains outlive their sources by the length of the reverb and
  * disconnecting them early chops the tail.
+ *
+ * Two things this has to get right, both of which were wrong first time and
+ * both of which only show up at distance:
+ *
+ *  - `seconds` is a lifetime measured from when the voice *sounds*, not from
+ *    now. A shot 120 m away is scheduled 350 ms into the future; tearing its
+ *    routing down 250 ms from now disconnects it before it has made a sound.
+ *  - An OfflineAudioContext renders faster than real time, so a wall-clock
+ *    timer fires in the middle of the render and cuts the output. Offline
+ *    contexts are single-use and thrown away, so there is nothing to release.
  */
 export function scheduleRelease(ac, route, seconds) {
-  const ms = Math.max(60, seconds * 1000);
-  setTimeout(route.release, ms);
+  if (typeof OfflineAudioContext !== 'undefined' && ac instanceof OfflineAudioContext) return;
+  const lead = Math.max(0, route.when - ac.currentTime);
+  setTimeout(route.release, Math.max(120, (lead + seconds) * 1000));
 }
 
 export { rnd as gunRnd };

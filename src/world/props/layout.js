@@ -39,7 +39,7 @@ const GRID_PAD = 3;             // m of grid beyond the level bounds
 const MAX_FLOOR_Y = 0.75;       // ground above this is furniture, not floor
 const MIN_HEADROOM = 1.9;       // m of clear space above a floor sample
 const WALL_PROBE = 1.6;         // m horizontal reach when looking for a wall
-const ZONE_LEN = 30;            // m of Z per batching zone
+const ZONE_LEN = 45;            // m of Z per batching zone
 
 const _o = new THREE.Vector3();
 const _d = new THREE.Vector3();
@@ -559,9 +559,18 @@ export class Field {
  * out per bucket, so prop count and draw count are decoupled.
  */
 export class BatchSet {
-  /** @param {string} name @param {number} [zoneLen] */
-  constructor(name, zoneLen = ZONE_LEN) {
+  /**
+   * @param {string} name
+   * @param {number} [zoneLen] metres of Z per bucket. `Infinity` disables the
+   *   spatial split, which is the right call for anything whose triangles are
+   *   cheap and whose bucket count is not: culling saves fill rate, and fill
+   *   rate for off-screen geometry is already zero.
+   * @param {boolean} [allowShadow] false forces every bucket non-casting, so a
+   *   tier of gravel does not cost three cascade draws per material.
+   */
+  constructor(name, zoneLen = ZONE_LEN, allowShadow = true) {
     this.name = name;
+    this.allowShadow = allowShadow;
     this.zoneLen = zoneLen;
     /** @type {Map<string,{batch:Batch,key:string,shadow:boolean}>} */
     this.buckets = new Map();
@@ -570,10 +579,12 @@ export class BatchSet {
   }
 
   zoneOf(z) {
+    if (!isFinite(this.zoneLen)) return 0;
     return Math.max(0, Math.min(7, Math.floor((this.z0 - z) / this.zoneLen)));
   }
 
   _bucket(matKey, z, shadow) {
+    if (!this.allowShadow) shadow = false;
     const id = `${matKey}|${this.zoneOf(z)}|${shadow ? 1 : 0}`;
     let b = this.buckets.get(id);
     if (!b) {
@@ -586,6 +597,7 @@ export class BatchSet {
   /** Adds a geometry under an explicit world matrix. */
   addMatrix(matKey, geo, m, color, shadow = false) {
     if (!geo) return this;
+    if (!this.allowShadow) shadow = false;
     this._bucket(matKey, m.elements[14], shadow).batch.addMatrix(geo, m, color || null);
     this.pieces++;
     return this;
