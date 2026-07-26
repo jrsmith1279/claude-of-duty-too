@@ -52,7 +52,15 @@ async function main() {
   const label = arg('label', '');
   const salt = arg('salt', '');
   const layout = arg('layout', 'side'); // side | stack
-  const panelW = parseInt(arg('panelw', '1100'), 10);
+  // 'native' (the default) resolves to the SMALLER of the two source widths, so
+  // whichever panel is already at that width is not resampled at all and the
+  // other is only ever downsampled. The references are 1920x1080 press frames;
+  // render the judged shots at 1920x1080 (`tools/shoot.mjs` defaults to it) and
+  // this comes out at 1920 and neither panel is touched. The old fixed 1100
+  // downsampled BOTH panels by 1.75x before a critic ever saw them, which threw
+  // away exactly the fine surface read the comparison is supposed to be about —
+  // methodologically clean, but it made the test insensitive.
+  const panelWArg = arg('panelw', 'native');
   // Both panels are resampled to the same width and then round-tripped through
   // JPEG at the same quality before compositing. Without this the blind test
   // leaks: the references are JPEG press images and our frames are PNG, so the
@@ -82,8 +90,16 @@ async function main() {
   const aCrop = parseCrop(arg('acrop', ''));
   const bCrop = parseCrop(arg('bcrop', ''));
 
-  // Deterministic shuffle: even hash keeps A on the left, odd swaps.
-  const swap = (hash32(path.basename(outBase) + salt) & 1) === 1;
+  // Panel order. It has to be reproducible (so a scored result can be audited)
+  // AND it has to move between runs (so a critic scoring ten sheets cannot
+  // learn "ours is the left one on street" and carry that across the set).
+  // Those pull against each other, so: one --seed per RUN, mixed with the sheet
+  // name, and the resolved seed written into the key. Same seed -> same sheet,
+  // byte for byte; new seed -> a fresh permutation of all ten.
+  const seed = arg('seed', '') || salt || 'default';
+  const shuffleKey = `${path.basename(outBase)}|${seed}`;
+  const shuffleHash = hash32(shuffleKey);
+  const swap = (shuffleHash & 1) === 1;
   const leftPath = swap ? bPath : aPath;
   const rightPath = swap ? aPath : bPath;
   const leftCrop = swap ? bCrop : aCrop;
@@ -95,7 +111,7 @@ async function main() {
   const page = await browser.newPage({ viewport: { width: 100, height: 100 } });
 
   const size = await page.evaluate(
-    async ({ leftUrl, rightUrl, label, layout, panelW, leftCrop, rightCrop, jpegQ }) => {
+    async ({ leftUrl, rightUrl, label, layout, panelWArg, leftCrop, rightCrop, jpegQ }) => {
       const load = (src) =>
         new Promise((res, rej) => {
           const im = new Image();
@@ -104,6 +120,10 @@ async function main() {
           im.src = src;
         });
       const [Lsrc, Rsrc] = await Promise.all([load(leftUrl), load(rightUrl)]);
+      const srcDims = {
+        left: [Lsrc.width, Lsrc.height],
+        right: [Rsrc.width, Rsrc.height],
+      };
 
       // Bake any crop into an offscreen canvas so the rest of the layout code
       // only ever deals with whole images.
@@ -144,9 +164,25 @@ async function main() {
         });
       };
 
+      const Lc = applyCrop(Lsrc, leftCrop);
+      const Rc = applyCrop(Rsrc, rightCrop);
+      // Resolve 'native' AFTER cropping, against what is actually going to be
+      // drawn: the smaller of the two, so nothing is ever upsampled.
+      const panelW = panelWArg === 'native'
+        ? Math.min(Lc.width, Rc.width)
+        : parseInt(panelWArg, 10);
+      const resampled = {
+        left: +(panelW / Lc.width).toFixed(4),
+        right: +(panelW / Rc.width).toFixed(4),
+      };
+      const aspect = {
+        left: +(Lc.width / Lc.height).toFixed(4),
+        right: +(Rc.width / Rc.height).toFixed(4),
+      };
+
       const [L, R] = await Promise.all([
-        normalise(applyCrop(Lsrc, leftCrop), jpegQ),
-        normalise(applyCrop(Rsrc, rightCrop), jpegQ),
+        normalise(Lc, jpegQ),
+        normalise(Rc, jpegQ),
       ]);
 
       const lh = Math.round((L.height / L.width) * panelW);
@@ -200,9 +236,9 @@ async function main() {
 
       document.body.style.margin = '0';
       document.body.appendChild(c);
-      return { W, H };
+      return { W, H, panelW, srcDims, resampled, aspect };
     },
-    { leftUrl, rightUrl, label, layout, panelW, leftCrop, rightCrop, jpegQ }
+    { leftUrl, rightUrl, label, layout, panelWArg, leftCrop, rightCrop, jpegQ }
   );
 
   await page.setViewportSize({ width: size.W, height: size.H });
@@ -221,14 +257,33 @@ async function main() {
     b: path.relative(ROOT, bPath),
     aCrop,
     bCrop,
-    panelW,
+    // Everything needed to reproduce this exact sheet, and everything a later
+    // reader needs to decide whether the trial was clean. A score collected off
+    // a sheet whose `resampled` are not 1 and 1 is a score with a known tell in
+    // it; record it rather than discovering it after the fact.
+    seed,
+    shuffleKey,
+    shuffleHash,
+    swap,
+    panelW: size.panelW,
+    sourceDims: size.srcDims,
+    resampleFactor: size.resampled,
+    sourceAspect: size.aspect,
     jpegQ,
+    clean:
+      size.resampled.left === 1 && size.resampled.right === 1 &&
+      Math.abs(size.aspect.left - size.aspect.right) < 0.002 &&
+      jpegQ > 0,
   };
   await writeFile(`${outBase}.key.json`, JSON.stringify(key, null, 2));
 
-  // Print the sheet path only — the key stays on disk so a critic reading this
-  // stdout cannot learn which panel is ours.
-  console.log(JSON.stringify({ ok: true, sheet, size }, null, 2));
+  // Print the sheet path and the sheet's own size ONLY. Everything per-panel —
+  // source dimensions, resample factor, aspect — stays in the key file, because
+  // any of them differing between LEFT and RIGHT would tell a critic reading
+  // this stdout which panel came from our renderer.
+  console.log(JSON.stringify({
+    ok: true, sheet, size: { W: size.W, H: size.H }, panelW: size.panelW, clean: key.clean,
+  }, null, 2));
 }
 
 main().catch((e) => {
