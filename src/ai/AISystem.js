@@ -28,6 +28,13 @@ const _dir = new THREE.Vector3();
 const _v3 = new THREE.Vector3();
 const _stagePos = new THREE.Vector3();
 const _stageAim = new THREE.Vector3();
+// Staging runs a camera basis through helpers that use the scratch above, so
+// it gets its own. Aliasing these is exactly the bug that put three bots in
+// one spot on top of a barrier.
+const _sEye = new THREE.Vector3();
+const _sFwd = new THREE.Vector3();
+const _sRight = new THREE.Vector3();
+const _sTmp = new THREE.Vector3();
 const UP_Y = new THREE.Vector3(0, 1, 0);
 
 /**
@@ -337,9 +344,10 @@ export class AISystem {
     // and a world-space pose list would be pointing at whatever used to be
     // there. Depth ladder: near/left, mid/centre, far/centre.
     const cam = opts.camera || STAGE_CAM;
-    const eye = _v0.set(cam.pos[0], cam.pos[1], cam.pos[2]);
-    const fwd = _v1.set(cam.look[0] - cam.pos[0], 0, cam.look[2] - cam.pos[2]).normalize();
-    const right = _v2.set(-fwd.z, 0, fwd.x);
+    const eye = _sEye.set(cam.pos[0], cam.pos[1], cam.pos[2]);
+    const fwd = _sFwd.set(cam.look[0] - cam.pos[0], 0, cam.look[2] - cam.pos[2]).normalize();
+    const right = _sRight.set(-fwd.z, 0, fwd.x);
+    const floorY = this._groundY(eye.x, eye.z, eye.y - 1.7);
 
     const plan = opts.plan || [
       { depth: 9.0, side: -3.0, crouch: 1, speed: 0, stride: 0.30, face: 0.15, aimUp: 1.15 },
@@ -348,7 +356,7 @@ export class AISystem {
     ];
 
     for (const p of plan) {
-      if (!this._stageSpot(eye, fwd, right, p, _stagePos)) continue;
+      if (!this._stageSpot(eye, fwd, right, floorY, p, _stagePos)) continue;
       // `face` is a yaw relative to the camera's view direction: 0 looks the
       // same way the camera does, PI looks back down the barrel at it.
       const camYaw = Math.atan2(fwd.x, fwd.z);
@@ -373,44 +381,39 @@ export class AISystem {
    * out of the walls and actually visible from the camera. A staged bot inside
    * a building is worse than no bot at all.
    */
-  _stageSpot(eye, fwd, right, p, out) {
+  _stageSpot(eye, fwd, right, floorY, p, out) {
     const phys = this.ctx?.physics;
-    const nudges = [0, 1.3, -1.3, 2.6, -2.6, 4.2, -4.2];
-    for (let i = 0; i < nudges.length; i++) {
-      out.copy(eye).addScaledVector(fwd, p.depth).addScaledVector(right, p.side + nudges[i]);
-      out.y = this._groundY(out.x, out.z, eye.y - 1.7);
-      // Chest height, since that is what has to be seen.
-      _v3.copy(out); _v3.y += p.crouch ? 0.95 : 1.35;
-      if (!phys?.raycast) return true;
-      _dir.copy(_v3).sub(eye);
-      const d = _dir.length();
-      if (d < 1e-3) continue;
-      _dir.multiplyScalar(1 / d);
-      const hit = phys.raycast(eye, _dir, d - 0.45, MASK_WORLD);
-      if (hit) continue;                       // something is in the way
-      // And there must be room to stand: nothing directly overhead.
-      _v3.copy(out); _v3.y += 0.4;
-      if (phys.raycast(_v3, UP_Y, 1.4, MASK_WORLD)) continue;
-      // Prefer standing next to real cover when one is close by.
-      if (p.crouch) this._snapToCover(out, 4.5);
-      return true;
+    const lateral = [0, 1.2, -1.2, 2.4, -2.4, 3.8, -3.8];
+    const depths = [0, -1.2, 1.2, -2.6, 2.6];
+    for (let di = 0; di < depths.length; di++) {
+      for (let i = 0; i < lateral.length; i++) {
+        out.copy(eye)
+          .addScaledVector(fwd, p.depth + depths[di])
+          .addScaledVector(right, p.side + lateral[i]);
+        out.y = this._groundY(out.x, out.z, floorY);
+        // Reject anything perched on top of a barrier, a crate or a roof: the
+        // staged frame wants soldiers in the street, and a cover point's `y`
+        // is the height of the cover, not of the floor beside it.
+        if (Math.abs(out.y - floorY) > 0.45) continue;
+        if (!phys?.raycast) return true;
+        // Chest height, since that is what has to be seen.
+        _sTmp.copy(out); _sTmp.y += p.crouch ? 0.95 : 1.35;
+        _dir.copy(_sTmp).sub(eye);
+        const d = _dir.length();
+        if (d < 2.5) continue;
+        _dir.multiplyScalar(1 / d);
+        if (phys.raycast(eye, _dir, d - 0.45, MASK_WORLD)) continue;
+        // Room to stand: nothing directly overhead, nothing to walk into.
+        _sTmp.copy(out); _sTmp.y += 0.45;
+        if (phys.raycast(_sTmp, UP_Y, 1.35, MASK_WORLD)) continue;
+        // Keep staged bots off each other.
+        let clash = false;
+        for (const b of this.bots) if (b.position.distanceTo(out) < 2.2) clash = true;
+        if (clash) continue;
+        return true;
+      }
     }
     return false;
-  }
-
-  _snapToCover(pos, maxDist) {
-    const points = this.ctx?.level?.coverPoints;
-    if (!points?.length) return;
-    let best = null, bestD = maxDist * maxDist;
-    for (const cp of points) {
-      if (!cp?.position) continue;
-      const d = cp.position.distanceToSquared(pos);
-      if (d < bestD) { bestD = d; best = cp; }
-    }
-    if (!best) return;
-    pos.copy(best.position);
-    if (best.normal) pos.addScaledVector(best.normal, -0.5);
-    pos.y = this._groundY(pos.x, pos.z, pos.y);
   }
 
   _freezePose(bot, pose, aim, ctx) {

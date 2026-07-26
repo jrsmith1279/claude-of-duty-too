@@ -76,14 +76,19 @@ export class MuzzleFlash {
   flash(worldMatrix, scale = 1, opts) {
     const k = THREE.MathUtils.clamp(scale || 1, 0.35, 3);
     this._basis(worldMatrix, opts?.dir);
-    // `persist` back-dates nothing but stretches the lives, which is how the
-    // staged screenshot keeps a flash lit for the whole settle window.
+    // `persist` freezes the flash at its peak for a staged screenshot: the
+    // life becomes `persist` and the particle is born 10% of that in the past,
+    // which lands it past the fade-in and well before the fade-out. Simply
+    // lengthening the life would slow the fade-in down with everything else and
+    // leave the flash invisible.
     const hold = opts?.persist || 0;
+    const holdAge = -hold * 0.10;
 
     // --- crown star ---------------------------------------------------------
     const star = resetSpec();
     star.x = _pos.x + _fwd.x * 0.045; star.y = _pos.y + _fwd.y * 0.045; star.z = _pos.z + _fwd.z * 0.045;
-    star.life = (0.035 + Math.random() * 0.018) + hold;
+    star.life = hold > 0 ? hold : 0.035 + Math.random() * 0.018;
+    star.delay = holdAge;
     star.gravity = 0; star.drag = 0;
     star.size0 = 0.30 * k; star.size1 = 0.44 * k;
     star.tile = PT.FLASH_STAR;
@@ -98,7 +103,7 @@ export class MuzzleFlash {
     // --- bore cones ---------------------------------------------------------
     const lobes = 1 + ((Math.random() * 2) | 0);
     for (let i = 0; i < lobes; i++) {
-      const len = (0.34 + Math.random() * 0.30) * k;
+      const len = (0.24 + Math.random() * 0.20) * k;
       const s = resetSpec();
       // Velocity-aligned so the cone points down the bore regardless of where
       // the camera is; the offset puts the lobe's base at the crown.
@@ -107,9 +112,10 @@ export class MuzzleFlash {
       s.y = _pos.y + _fwd.y * len * 0.5;
       s.z = _pos.z + _fwd.z * len * 0.5;
       s.vx = _fwd.x * speed; s.vy = _fwd.y * speed; s.vz = _fwd.z * speed;
-      s.life = (0.030 + Math.random() * 0.020) + hold;
+      s.life = hold > 0 ? hold : 0.030 + Math.random() * 0.020;
+      s.delay = holdAge;
       s.gravity = 0; s.drag = 0;
-      s.size0 = (0.13 + Math.random() * 0.07) * k;
+      s.size0 = (0.16 + Math.random() * 0.08) * k;
       s.size1 = s.size0 * 1.35;
       s.stretch = len / speed;
       s.tile = PT.FLASH_LOBE;
@@ -131,7 +137,8 @@ export class MuzzleFlash {
         .addScaledVector(_up, rnd(-0.28, 0.32))
         .normalize();
       s.vx = _tmp.x * sp; s.vy = _tmp.y * sp; s.vz = _tmp.z * sp;
-      s.life = rnd(0.10, 0.34) + hold * 0.5;
+      s.life = rnd(0.10, 0.34) + hold * 0.35;
+      s.delay = holdAge * 0.5;
       s.drag = 4.5; s.gravity = -8;
       s.size0 = rnd(0.008, 0.018); s.size1 = s.size0 * 0.5;
       s.tile = PT.SPARK; s.stretch = 0.006; s.soft = 0.06;
@@ -147,7 +154,8 @@ export class MuzzleFlash {
       s.x = _pos.x + _fwd.x * 0.12; s.y = _pos.y + _fwd.y * 0.12; s.z = _pos.z + _fwd.z * 0.12;
       _tmp.copy(_fwd).addScaledVector(_right, rnd(-0.5, 0.5)).addScaledVector(_up, rnd(-0.2, 0.5));
       s.vx = _tmp.x * 2.2; s.vy = _tmp.y * 2.2; s.vz = _tmp.z * 2.2;
-      s.life = rnd(0.35, 0.7) + hold;
+      s.life = rnd(0.35, 0.7) + hold * 0.6;
+      s.delay = holdAge * 0.4;
       s.drag = 4.0; s.gravity = 0.25; s.turb = 0.25;
       s.size0 = 0.07 * k; s.size1 = rnd(0.35, 0.6) * k;
       s.tile = PT.SMOKE_B; s.soft = 0.45;

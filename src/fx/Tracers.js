@@ -67,8 +67,12 @@ void main(){
 
   vQ = vec2(position.x * 2.0, py);
   vCol = tD.rgb * tD.w;
-  // Fade out over the last 25% of flight, and kill the muzzle-adjacent smear.
-  vFade = (1.0 - smoothstep(0.72, 1.0, u)) * clamp(travelled * 1.6, 0.0, 1.0);
+  // Fade out over the last 25% of flight, kill the muzzle-adjacent smear, and
+  // dim a round that is passing within arm's reach — at 30 cm a tracer covers
+  // a third of the screen in bloom and reads as a lens artefact, not a bullet.
+  vFade = (1.0 - smoothstep(0.72, 1.0, u))
+        * clamp(travelled * 1.6, 0.0, 1.0)
+        * smoothstep(0.5, 2.2, dist);
 
   vec4 mv = viewMatrix * vec4(p, 1.0);
   gl_Position = projectionMatrix * mv;
@@ -183,7 +187,7 @@ export class Tracers {
     d[o] = col ? col[0] : 1.0;
     d[o + 1] = col ? col[1] : 0.80;
     d[o + 2] = col ? col[2] : 0.38;
-    d[o + 3] = opts?.intensity ?? 5.5;
+    d[o + 3] = opts?.intensity ?? 3.6;
 
     const expiry = birth + c[o + 2];
     if (expiry > this.maxExpiry) this.maxExpiry = expiry;

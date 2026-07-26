@@ -56,7 +56,7 @@ const ROLL_PULL = 0.07;
 // stands with soft knees anyway.
 const STANCE = {
   stand: { hip: 0.905, lean: 0.02, width: 1.00, eye: 1.630 },
-  crouch: { hip: 0.665, lean: 0.16, width: 1.30, eye: 1.205 },
+  crouch: { hip: 0.695, lean: 0.18, width: 1.08, eye: 1.235 },
 };
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -475,7 +475,7 @@ export class BotAnimator {
       }
 
       // Knee points forward, opened out in a crouch and rolled with the lean.
-      _c.set(f.side * (0.20 + crouch * 0.42), 0.06, 1).normalize();
+      _c.set(f.side * (0.17 + crouch * 0.16), 0.05, 1).normalize();
       solveTwoBone(_b, _a, LIMB.thigh, LIMB.shin, _c, _d, _e);
 
       const thigh = this.bone('thigh' + S);
@@ -601,7 +601,9 @@ export class BotAnimator {
     const slack = THREE.MathUtils.clamp((reach - ARM_MAX * 0.82) / (ARM_MAX * 0.35), 0, 1);
     const prot = slack * (left ? 0.55 : 0.30) * (0.4 + aim * 0.6);
     const clav = this.bone('shoulder' + S);
-    _eu.set(-slack * 0.12, left ? prot : -prot, left ? -prot * 0.35 : prot * 0.35, 'YXZ');
+    // Roll sign matters: on the left clavicle (-X) a negative Z rotation
+    // lifts the shoulder, and two shrugging shoulders read as a surrender.
+    _eu.set(-slack * 0.12, left ? prot : -prot, left ? prot * 0.30 : -prot * 0.30, 'YXZ');
     clav.quaternion.setFromEuler(_eu);
 
     _q0.copy(this._Q.chest).multiply(clav.quaternion);               // clavicle, rig

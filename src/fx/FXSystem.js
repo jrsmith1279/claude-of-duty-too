@@ -341,6 +341,25 @@ export class FXSystem {
     this.muzzle.releaseStaticLights();
   }
 
+  /**
+   * Fires a staged tracer and back-dates it so the round's head ends up
+   * `headDistance` metres from the camera.
+   */
+  _tracerToward(from, to, speed, headDistance, opts) {
+    _v3.set(to.x - from.x, to.y - from.y, to.z - from.z);
+    const total = _v3.length();
+    if (total < 0.5) return;
+    _v3.multiplyScalar(1 / total);
+    // Distance along the path at which the round is `headDistance` from us.
+    const camAlong = _v3.dot(_scratchCam.copy(this.ctx.camera.position).sub(from));
+    const travel = THREE.MathUtils.clamp(camAlong - headDistance, 1.0, total - 0.5);
+    _stageOpts.age = travel / speed;
+    _stageOpts.width = opts?.width;
+    _stageOpts.intensity = opts?.intensity;
+    _stageOpts.color = opts?.color;
+    this.tracers.fire(from, to, speed, _stageOpts);
+  }
+
   /** Runs `fn` as if it had happened `age` seconds ago. */
   _at(age, fn) {
     const t = this.time;
@@ -349,6 +368,64 @@ export class FXSystem {
     fn();
     this.lit.time = t;
     this.add.time = t;
+  }
+
+  /**
+   * The nearest readable wall in frame. A staged impact on a facade 25 m away
+   * is four pixels of dust; sweeping for a surface between 4 and 16 m with a
+   * near-vertical normal is what makes the burst actually legible.
+   */
+  _findWall(cam, out) {
+    let best = null;
+    let bestScore = 1e9;
+    const yaws = [-30, -23, -16, -9, 9, 16, 23, 30];
+    const pitches = [7, 1, -6];
+    for (let i = 0; i < yaws.length; i++) {
+      for (let j = 0; j < pitches.length; j++) {
+        const h = this._probe(cam, yaws[i], pitches[j], 34, _wallScan);
+        if (!h.hit || Math.abs(h.normal.y) > 0.55) continue;
+        // Prefer ~9 m out and away from the centre of frame, where the
+        // viewmodel sits.
+        const score = Math.abs(h.distance - 9) + Math.abs(Math.abs(yaws[i]) - 20) * 0.25;
+        if (score < bestScore) {
+          bestScore = score;
+          best = { yaw: yaws[i], pitch: pitches[j] };
+        }
+      }
+    }
+    if (!best) return this._probe(cam, -21, 2.5, 55, out);
+    return this._probe(cam, best.yaw, best.pitch, 34, out);
+  }
+
+  /**
+   * First open, camera-visible patch of ground among a list of
+   * `[forward, right]` offsets. Returns the physics hit or null.
+   */
+  _findGround(cam, candidates) {
+    const phys = this.ctx.physics;
+    if (!phys?.raycast) return null;
+    _fwd.set(0, 0, -1).applyQuaternion(cam.quaternion);
+    _right.set(1, 0, 0).applyQuaternion(cam.quaternion);
+    for (let i = 0; i < candidates.length; i++) {
+      _v.copy(cam.position)
+        .addScaledVector(_fwd, candidates[i][0])
+        .addScaledVector(_right, candidates[i][1]);
+      _v.y = cam.position.y + 4;
+      const g = phys.raycast(_v, DOWN, 14, 1 | 2);
+      if (!g || g.normal.y < 0.7) continue;
+      // Line of sight: aim a metre above the base so a kerb does not veto it.
+      _v2.copy(g.point).sub(cam.position);
+      _v2.y += 1.0;
+      const d = _v2.length();
+      _v2.multiplyScalar(1 / d);
+      const block = phys.raycast(cam.position, _v2, d - 0.6, 1 | 2);
+      if (block) continue;
+      _groundHit.point.copy(g.point);
+      _groundHit.normal.copy(g.normal);
+      _groundHit.distance = d;
+      return _groundHit;
+    }
+    return null;
   }
 
   /** Raycast from the camera along a yaw/pitch offset from its forward axis. */
@@ -406,9 +483,20 @@ export class FXSystem {
     const camPos = cam.position;
 
     // --- the wall taking fire ------------------------------------------------
-    this._probe(cam, -21, 2.5, 55, A);
-    this._probe(cam, -14, -1.0, 55, B);
-    this._probe(cam, 4, -14, 24, G);
+    this._findWall(cam, A);
+    if (A.hit) {
+      // Second round a little along the same wall, so the pair reads as a burst
+      // walking across it rather than as two unrelated events.
+      _v2.set(0, 1, 0).cross(A.normal).normalize();
+      _p.copy(A.point).addScaledVector(_v2, 0.55).addScaledVector(A.normal, 1.2);
+      _v.copy(A.normal).multiplyScalar(-1);
+      const h2 = ctx.physics?.raycast?.(_p, _v, 2.4, 1 | 2);
+      if (h2) { B.point.copy(h2.point); B.normal.copy(h2.normal); B.distance = A.distance; B.material = h2.material; B.hit = true; }
+      else B.hit = false;
+    } else {
+      this._probe(cam, -14, -1.0, 55, B);
+    }
+    this._probe(cam, 6, -13, 24, G);
     // `_probe` clobbers the basis vectors; restore them.
     _fwd.set(0, 0, -1).applyQuaternion(cam.quaternion);
     _right.set(1, 0, 0).applyQuaternion(cam.quaternion);
@@ -432,10 +520,31 @@ export class FXSystem {
     // Two fresh impacts at different ages so the dust has structure.
     if (A.hit) this._at(0.30, () => this.impacts.impact(A.point, A.normal, A.material || 'concrete_wall', 1.7));
     if (B.hit) this._at(0.08, () => this.impacts.impact(B.point, B.normal, B.material || 'concrete_wall', 2.1));
-    if (G.hit) this._at(0.18, () => this.impacts.impact(G.point, G.normal, G.material || 'asphalt', 1.4));
+    if (G.hit) {
+      this._at(0.18, () => this.impacts.impact(G.point, G.normal, G.material || 'asphalt', 1.8));
+      // Two more walking away up the road: the closest FX in frame, so they are
+      // the ones that carry the sense of incoming fire.
+      _v2.set(0, 1, 0).cross(G.normal);
+      if (_v2.lengthSq() < 1e-6) _v2.set(1, 0, 0);
+      _v2.normalize();
+      _v3.copy(G.normal).cross(_v2).normalize();
+      for (let i = 0; i < 2; i++) {
+        _p.copy(G.point)
+          .addScaledVector(_v2, (i === 0 ? 1.15 : -0.9))
+          .addScaledVector(_v3, (i === 0 ? 1.5 : 2.6))
+          .addScaledVector(G.normal, 1.0);
+        _v.copy(G.normal).multiplyScalar(-1);
+        const gh = ctx.physics?.raycast?.(_p, _v, 2.2, 1 | 2);
+        if (!gh) continue;
+        const pt = _stageHitB2;
+        pt.point.copy(gh.point); pt.normal.copy(gh.normal);
+        this._at(i === 0 ? 0.05 : 0.34, () =>
+          this.impacts.impact(pt.point, pt.normal, gh.material || 'asphalt', 1.6));
+      }
+    }
 
     // --- enemy positions and muzzle flash ------------------------------------
-    _v.copy(camPos).addScaledVector(_fwd, 15).addScaledVector(_right, -2.9);
+    _v.copy(camPos).addScaledVector(_fwd, 13).addScaledVector(_right, -3.2);
     _v.y = camPos.y - 0.28;
     _v2.copy(_v).sub(camPos);
     const dist = Math.max(1e-3, _v2.length());
@@ -445,7 +554,7 @@ export class FXSystem {
     const enemy = _stageEnemy.copy(_v);
 
     _v2.copy(camPos).sub(enemy).normalize();
-    this._at(0.012, () => this.muzzle.flash(enemy, 1.6, { dir: _v2, persist: 5.0 }));
+    this._at(0.012, () => this.muzzle.flash(enemy, 1.9, { dir: _v2, persist: 5.0 }));
 
     // A second shooter further back and to the other side.
     _v.copy(camPos).addScaledVector(_fwd, 25).addScaledVector(_right, 4.2);
@@ -460,11 +569,14 @@ export class FXSystem {
     this._at(0.02, () => this.muzzle.flash(far, 1.0, { dir: _v2, persist: 5.0, light: false }));
 
     // --- rounds in flight -----------------------------------------------------
-    _p.copy(camPos).addScaledVector(_right, 1.5).addScaledVector(_up, 0.25).addScaledVector(_fwd, -3);
-    this.tracers.fire(enemy, _p, 880, { age: 0.0165, width: 0.05, intensity: 7.5 });
+    // `age` is chosen so each round's head sits a fixed distance *in front of*
+    // the camera. Freezing one at the lens turns it into a full-screen bloom
+    // smear that reads as a lens artefact rather than as a bullet.
+    _p.copy(camPos).addScaledVector(_right, 2.3).addScaledVector(_up, 0.30).addScaledVector(_fwd, -6);
+    this._tracerToward(enemy, _p, 880, 8.5, { width: 0.030, intensity: 4.2 });
 
-    _p.copy(camPos).addScaledVector(_right, -1.1).addScaledVector(_up, -0.55).addScaledVector(_fwd, -2);
-    this.tracers.fire(far, _p, 900, { age: 0.030, width: 0.045, intensity: 6.0 });
+    _p.copy(camPos).addScaledVector(_right, -1.9).addScaledVector(_up, -0.35).addScaledVector(_fwd, -5);
+    this._tracerToward(far, _p, 900, 13.0, { width: 0.026, intensity: 3.4 });
 
     if (A.hit) {
       _p.copy(camPos).addScaledVector(_right, 0.20).addScaledVector(_up, -0.10).addScaledVector(_fwd, 0.62);
@@ -474,26 +586,29 @@ export class FXSystem {
       });
     }
     // A third, high and crossing, so the rounds are not all parallel.
-    _v.copy(camPos).addScaledVector(_fwd, 30).addScaledVector(_right, -9).addScaledVector(_up, 2.2);
-    _p.copy(camPos).addScaledVector(_right, 6).addScaledVector(_up, 1.6).addScaledVector(_fwd, 4);
-    this.tracers.fire(_v, _p, 850, { age: 0.019, width: 0.038, intensity: 5.0 });
+    _v.copy(camPos).addScaledVector(_fwd, 30).addScaledVector(_right, -9).addScaledVector(_up, 3.0);
+    _p.copy(camPos).addScaledVector(_right, 7).addScaledVector(_up, 2.4).addScaledVector(_fwd, 6);
+    this._tracerToward(_v, _p, 850, 11.0, { width: 0.024, intensity: 3.0 });
 
     // --- brass in the air ------------------------------------------------------
     for (let i = 0; i < 5; i++) {
       const f = i / 4;
       _p.copy(camPos)
-        .addScaledVector(_right, 0.16 + f * 0.62)
-        .addScaledVector(_up, -0.06 + f * 0.46 - f * f * 0.40)
-        .addScaledVector(_fwd, 0.52 - f * 0.14);
+        .addScaledVector(_right, 0.20 + f * 0.55)
+        .addScaledVector(_up, -0.30 + f * 0.30 - f * f * 0.30)
+        .addScaledVector(_fwd, 0.50 - f * 0.12);
       _e.set(Math.random() * 6.28, Math.random() * 6.28, Math.random() * 6.28);
       _q2.setFromEuler(_e);
       this.shells.place(_p, _q2, 'rifle');
     }
 
     // --- environment: burning column, hanging dust, scorch ---------------------
-    _v.copy(camPos).addScaledVector(_fwd, 27).addScaledVector(_right, 6.5);
-    _v.y = camPos.y + 3;
-    const groundHit = ctx.physics?.raycast?.(_v, DOWN, 12, 1 | 2);
+    // Try a handful of spots down the street and take the first that is open
+    // ground the camera can actually see. Hardcoding a position guarantees the
+    // column ends up inside a building the moment the level changes.
+    const groundHit = this._findGround(cam, [
+      [22, 5.5], [26, -6.5], [17, 7.5], [30, 3.0], [14, -7.0], [20, 0.5],
+    ]);
     if (groundHit) {
       _p.copy(groundHit.point);
       const col = this.smoke.column(_p, {
@@ -608,3 +723,8 @@ const makeHit = () => ({
 const _stageHitA = makeHit();
 const _stageHitB = makeHit();
 const _stageHitG = makeHit();
+const _groundHit = makeHit();
+const _wallScan = makeHit();
+const _stageHitB2 = makeHit();
+const _scratchCam = new THREE.Vector3();
+const _stageOpts = { age: 0, width: 0.02, intensity: 3.5, color: null };

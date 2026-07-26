@@ -138,12 +138,19 @@ void main(){
   vec3 fwd = normalize(toCam);
   float sp = length(vel);
 
-  if (iE.x > 0.0 && sp > 0.06) {
+  // A velocity-aligned billboard degenerates when the velocity points at the
+  // camera — cross(axis, view) collapses and the quad snaps to an arbitrary
+  // basis, which shows up as a flat bar across the screen. Blend back to a
+  // plain camera-facing quad as that happens; seen end-on a spark or a muzzle
+  // cone *is* a round blob, so this is also the correct look.
+  float axisView = iE.x > 0.0 && sp > 0.06 ? 1.0 - abs(dot(vel / sp, fwd)) : 0.0;
+  float aligned = smoothstep(0.02, 0.30, axisView);
+  if (aligned > 0.001) {
     vec3 ax = vel / sp;
     vec3 side = cross(ax, fwd);
     float sl = length(side);
     side = sl > 1e-3 ? side / sl : vec3(1.0, 0.0, 0.0);
-    float len = sz + iE.x * sp;
+    float len = mix(sz, sz + iE.x * sp, aligned);
     wpos += side * (position.x * sz) + ax * (position.y * len);
   } else {
     float rot = iC.z + iC.w * t;

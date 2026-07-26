@@ -400,10 +400,10 @@ function buildGear() {
   // Helmet: dome, brim, NVG mount, side rails.
   const dome = new THREE.SphereGeometry(0.128, 14, 9, 0, Math.PI * 2, 0, Math.PI * 0.58);
   b.add(dome, at(0, 1.672, 0.002, 0, 0, 0, 1.0, 1.06, 1.08), C.helmet, rigid('head'), 2.0);
-  b.add(rbox(0.250, 0.036, 0.270, 0.016), at(0, 1.680, 0.008), C.helmet, rigid('head'), 2.2);
+  b.add(rbox(0.228, 0.034, 0.248, 0.016), at(0, 1.678, 0.010), C.helmet, rigid('head'), 2.2);
   b.add(rbox(0.052, 0.052, 0.040, 0.010), at(0, 1.742, 0.108), C.helmetTrim, rigid('head'), 2.4);
-  b.add(rbox(0.014, 0.030, 0.150, 0.006), at(-0.118, 1.700, 0.010), C.helmetTrim, rigid('head'), 2.4);
-  b.add(rbox(0.014, 0.030, 0.150, 0.006), at(0.118, 1.700, 0.010), C.helmetTrim, rigid('head'), 2.4);
+  b.add(rbox(0.013, 0.026, 0.128, 0.006), at(-0.112, 1.698, 0.012), C.helmetTrim, rigid('head'), 2.4);
+  b.add(rbox(0.013, 0.026, 0.128, 0.006), at(0.112, 1.698, 0.012), C.helmetTrim, rigid('head'), 2.4);
   // Goggles pushed up on the brim: a bright specular line at eye level, which
   // is what makes a helmeted head read as a head and not a lump.
   b.add(rbox(0.190, 0.052, 0.060, 0.020), at(0, 1.706, 0.092, -0.15), C.goggle, rigid('head'), 3.0);
