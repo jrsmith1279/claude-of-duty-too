@@ -11,7 +11,7 @@
  */
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
-import { mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,6 +31,7 @@ const PORT = parseInt(arg('port', '5173'), 10);
 const URL = `http://localhost:${PORT}/`;
 const WARMUP_MS = parseInt(arg('warmup', '6000'), 10);
 const SETTLE_MS = parseInt(arg('settle', '1600'), 10);
+const CHECK = flag('checks');
 
 /**
  * Camera presets. Each exercises a different part of the renderer so a critic
@@ -134,6 +135,211 @@ export const JUDGED = [
   'establishing', 'street', 'interior', 'weapon', 'ads',
   'materials', 'goldenhour', 'night', 'skyline', 'combat',
 ];
+
+/**
+ * The acceptance criteria that are numbers, computed from the PNGs instead of
+ * eyeballed. Every one of these is something a hostile critic applies by eye in
+ * under a second — a pane that is not dark enough against its wall, a soldier
+ * that is not darker than what is behind him, a specular hit on far ground, a
+ * corridor end that is a flat card, a horizon seam. Eyeballing them has already
+ * produced three reviews of a brick wall on this project.
+ *
+ * Regions are NORMALISED (0..1 of frame), so they survive a resolution change.
+ * They are tied to specific presets and will need moving if those presets move —
+ * which is exactly why they live next to the presets.
+ */
+const CHECK_REGIONS = {
+  // Sunlit facade slab in READ30. p08 is the panes, p85 the lit wall.
+  read30:       { facade: [0.34, 0.05, 0.36, 0.60] },
+  // Street corridor end (the haze plug at the vanishing point) and clear sky.
+  street:       { corridorEnd: [0.500, 0.445], skyOffsetPx: -100 },
+  // Establishing: ground band beyond the mid-street, and the seam scan.
+  establishing: { farGround: [0.420, 0.446, 0.160, 0.020], seamFrom: 0.34 },
+};
+
+const relLum = (r, g, b) => {
+  const f = (c) => { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+  return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+};
+const lstar = (Y) => (Y <= 0.008856 ? 903.3 * Y : 116 * Math.pow(Y, 1 / 3) - 16);
+
+/**
+ * Runs the pixel checks in a throwaway Chromium page (canvas is the only PNG
+ * decoder available without adding a dependency, and adding one is forbidden).
+ */
+async function runChecks(browser, shots, probes) {
+  const page = await browser.newPage({ viewport: { width: 64, height: 64 } });
+  const out = [];
+  for (const s of shots) {
+    const regions = CHECK_REGIONS[s.name];
+    const botRects = probes[s.name]?.bots || [];
+    if (!regions && !botRects.length) continue;
+    const buf = await readFile(s.file);
+    const url = `data:image/png;base64,${buf.toString('base64')}`;
+    const r = await page.evaluate(
+      async ({ url, name, regions, botRects, relLumSrc, lstarSrc }) => {
+        const relLum = eval(`(${relLumSrc})`);
+        const lstar = eval(`(${lstarSrc})`);
+        const im = await new Promise((res, rej) => {
+          const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url;
+        });
+        const W = im.width, H = im.height;
+        const c = document.createElement('canvas');
+        c.width = W; c.height = H;
+        const g = c.getContext('2d', { willReadFrequently: true });
+        g.drawImage(im, 0, 0);
+        const px = g.getImageData(0, 0, W, H).data;
+        const Y = new Float32Array(W * H);
+        for (let i = 0, j = 0; i < px.length; i += 4, j++) Y[j] = relLum(px[i], px[i + 1], px[i + 2]);
+        const findings = [];
+        const pct = (arr, p) => { const a = Float32Array.from(arr).sort(); return a[Math.min(a.length - 1, Math.floor(p * a.length))]; };
+
+        // ---- pane luminance vs adjacent lit wall (<= 0.18x)
+        if (regions?.facade) {
+          const [fx, fy, fw, fh] = regions.facade;
+          const x0 = (fx * W) | 0, y0 = (fy * H) | 0, x1 = ((fx + fw) * W) | 0, y1 = ((fy + fh) * H) | 0;
+          const v = [];
+          for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) v.push(Y[y * W + x]);
+          const pane = pct(v, 0.08), wall = pct(v, 0.85);
+          findings.push({
+            check: 'paneVsLitWall', target: '<= 0.18',
+            value: +(pane / Math.max(wall, 1e-6)).toFixed(3),
+            pass: pane / Math.max(wall, 1e-6) <= 0.18,
+            detail: { paneP08: +pane.toFixed(4), wallP85: +wall.toFixed(4), region: regions.facade },
+            approximation: 'panes are the 8th luminance percentile of the facade slab, lit wall the 85th; it is a distribution proxy, not a segmentation',
+          });
+        }
+
+        // ---- corridor end vs clear sky, and does it contain structure
+        if (regions?.corridorEnd) {
+          const [cx, cy] = regions.corridorEnd;
+          const patch = (px0, py0, n) => {
+            const v = [];
+            for (let y = py0; y < py0 + n; y++) for (let x = px0; x < px0 + n; x++) {
+              if (x >= 0 && y >= 0 && x < W && y < H) v.push(Y[y * W + x]);
+            }
+            const m = v.reduce((a, b) => a + b, 0) / v.length;
+            const sd = Math.sqrt(v.reduce((a, b) => a + (b - m) * (b - m), 0) / v.length);
+            return { mean: m, sd };
+          };
+          const ex = ((cx * W) | 0) - 16, ey = ((cy * H) | 0) - 16;
+          const end = patch(ex, ey, 32);
+          const sky = patch(ex, ey + Math.round(regions.skyOffsetPx * (H / 1080)), 32);
+          const ratio = end.mean / Math.max(sky.mean, 1e-6);
+          findings.push({
+            check: 'corridorEndVsSky', target: '0.42 - 0.80',
+            value: +ratio.toFixed(3), pass: ratio >= 0.42 && ratio <= 0.80,
+            detail: { endMean: +end.mean.toFixed(4), skyMean: +sky.mean.toFixed(4) },
+          });
+          findings.push({
+            check: 'corridorEndStructure', target: 'sd >= 0.020',
+            value: +end.sd.toFixed(4), pass: end.sd >= 0.020,
+            detail: 'a flat card and a real hazed depth plane have the same mean; only the variance separates them',
+          });
+        }
+
+        // ---- far-ground specular hotspot
+        if (regions?.farGround) {
+          const [gx, gy, gw, gh] = regions.farGround;
+          const x0 = (gx * W) | 0, y0 = (gy * H) | 0, x1 = ((gx + gw) * W) | 0, y1 = ((gy + gh) * H) | 0;
+          const v = [];
+          for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) v.push(Y[y * W + x]);
+          const med = pct(v, 0.5), hi = pct(v, 0.95);
+          findings.push({
+            check: 'farGroundHotspot', target: '<= 1.15', advisory: true,
+            value: +(hi / Math.max(med, 1e-6)).toFixed(3), pass: hi / Math.max(med, 1e-6) <= 1.15,
+            detail: { p95: +hi.toFixed(4), median: +med.toFixed(4) },
+            approximation: 'ADVISORY, do not gate on it. The >100 m condition is a SCREEN REGION and not a depth test — the harness cannot read the depth buffer back — so any prop, kerb or vehicle standing in the band counts as ground and inflates it. Treat a high number as "go and look", not as a defect.',
+          });
+        }
+
+        // ---- horizontal seam scan
+        if (regions?.seamFrom !== undefined) {
+          const yStart = (regions.seamFrom * H) | 0;
+          let worstFrac = 0, worstRow = -1;
+          const rows = [];
+          for (let y = yStart; y < H - 1; y++) {
+            let up = 0, dn = 0, sa = 0, sb = 0;
+            for (let x = 0; x < W; x++) {
+              const a = Y[y * W + x], b = Y[(y + 1) * W + x];
+              sa += a; sb += b;
+              const d = (b - a) / Math.max(a, 1e-4);
+              if (d > 0.12) up++; else if (d < -0.12) dn++;
+            }
+            // SIGNED and coherent. The first version of this counted absolute
+            // steps and fired on every roofline in the frame, because a row of
+            // windows steps just as hard as a seam does — it just steps both
+            // ways. A seam is one direction across the width AND it moves the
+            // row mean; a facade detail does neither.
+            const frac = Math.max(up, dn) / W;
+            const meanShift = Math.abs(sb - sa) / Math.max(sa, 1e-4);
+            if (frac > worstFrac) { worstFrac = frac; worstRow = y; }
+            if (frac > 0.30 && meanShift > 0.06) {
+              rows.push({ y, frac: +frac.toFixed(3), meanShift: +meanShift.toFixed(3) });
+            }
+          }
+          findings.push({
+            check: 'horizonSeam', advisory: true,
+            target: 'no row with >30% of width stepping >12% in ONE direction and shifting the row mean >6%',
+            value: +worstFrac.toFixed(3), pass: rows.length === 0,
+            detail: { worstRow, offendingRows: rows.slice(0, 8), scannedFrom: yStart },
+          });
+        }
+
+        // ---- bots: darker than background, and not red-shifted
+        if (botRects.length) {
+          let worstDelta = 1e9, worstRB = -1e9;
+          const per = [];
+          for (const [bx, by, bw, bh] of botRects) {
+            const ix0 = Math.max(0, Math.round(bx + bw * 0.25)), ix1 = Math.min(W, Math.round(bx + bw * 0.75));
+            const iy0 = Math.max(0, Math.round(by + bh * 0.20)), iy1 = Math.min(H, Math.round(by + bh * 0.70));
+            if (ix1 <= ix0 || iy1 <= iy0) continue;
+            let sy = 0, n = 0;
+            const rbs = [];
+            for (let y = iy0; y < iy1; y++) for (let x = ix0; x < ix1; x++) {
+              const i = (y * W + x) * 4;
+              sy += Y[y * W + x]; n++;
+              rbs.push(px[i] - px[i + 2]);
+            }
+            // p98 rather than max. A bot standing next to a burning vehicle has
+            // fire pixels inside its projected box; one of them took the max to
+            // 159 and the check reported the fire as a warm-tinted soldier.
+            const maxRB = rbs.length ? pct(rbs, 0.98) : 0;
+            // 20 px annulus outside the projected box
+            let sa = 0, na = 0;
+            const A = 20;
+            for (let y = by - A; y < by + bh + A; y++) for (let x = bx - A; x < bx + bw + A; x++) {
+              if (x < 0 || y < 0 || x >= W || y >= H) continue;
+              if (x >= bx && x < bx + bw && y >= by && y < by + bh) continue;
+              sa += Y[y * W + x]; na++;
+            }
+            if (!n || !na) continue;
+            const dL = lstar(sa / na) - lstar(sy / n);
+            per.push({ rect: [bx, by, bw, bh], deltaLstar: +dL.toFixed(1), maxRminusB: maxRB });
+            worstDelta = Math.min(worstDelta, dL);
+            worstRB = Math.max(worstRB, maxRB);
+          }
+          if (per.length) {
+            findings.push({
+              check: 'botVsBackgroundLstar', target: '>= 22 points darker',
+              value: +worstDelta.toFixed(1), pass: worstDelta >= 22,
+              detail: { bots: per.length, per },
+            });
+            findings.push({
+              check: 'botMaxRminusB_p98', target: '<= 18',
+              value: worstRB, pass: worstRB <= 18,
+            });
+          }
+        }
+        return { shot: name, findings };
+      },
+      { url, name: s.name, regions: regions || null, botRects, relLumSrc: relLum.toString(), lstarSrc: lstar.toString() }
+    );
+    out.push(r);
+  }
+  await page.close();
+  return out;
+}
 
 async function waitForServer(url, timeoutMs = 30000) {
   const t0 = Date.now();
@@ -242,6 +448,7 @@ async function main() {
     all: Object.keys(SHOTS),
   };
   const spec = arg('shots', '');
+  const probes = {};
   const requested = spec
     ? spec.split(',').flatMap((n) => GROUPS[n] ?? [n])
     : JUDGED;
@@ -261,6 +468,44 @@ async function main() {
     await page.waitForTimeout(SETTLE_MS);
     const file = path.join(OUT, `${name}.png`);
     await page.screenshot({ path: file, type: 'png' });
+    // Screen-space rectangles for anything a pixel check needs to find but
+    // cannot segment from the image — today that is the bots. Projected here,
+    // while the camera that took the frame is still the live camera.
+    if (CHECK) {
+      probes[name] = await page.evaluate(() => {
+        const api = window.__COD__;
+        const cam = api?.ctx?.camera;
+        const bots = api?.ctx?.ai?.bots || [];
+        if (!cam || !bots.length) return { bots: [] };
+        const THREE = api.ctx.THREE || null;
+        const out = [];
+        const w = window.innerWidth, h = window.innerHeight;
+        for (const b of bots) {
+          if (!b?.position || b.alive === false) continue;
+          let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, any = false;
+          for (const dx of [-0.32, 0.32]) for (const dz of [-0.24, 0.24]) for (const dy of [0.15, 1.72]) {
+            const v = { x: b.position.x + dx, y: b.position.y + dy, z: b.position.z + dz };
+            // project by hand so this does not depend on THREE being exposed
+            const m = cam.matrixWorldInverse.elements, p = cam.projectionMatrix.elements;
+            const ex = m[0] * v.x + m[4] * v.y + m[8] * v.z + m[12];
+            const ey = m[1] * v.x + m[5] * v.y + m[9] * v.z + m[13];
+            const ez = m[2] * v.x + m[6] * v.y + m[10] * v.z + m[14];
+            const cw = p[3] * ex + p[7] * ey + p[11] * ez + p[15];
+            if (cw <= 0.001) continue;
+            const cx = (p[0] * ex + p[4] * ey + p[8] * ez + p[12]) / cw;
+            const cy = (p[1] * ex + p[5] * ey + p[9] * ez + p[13]) / cw;
+            const sx = (cx * 0.5 + 0.5) * w, sy = (1 - (cy * 0.5 + 0.5)) * h;
+            x0 = Math.min(x0, sx); x1 = Math.max(x1, sx);
+            y0 = Math.min(y0, sy); y1 = Math.max(y1, sy);
+            any = true;
+          }
+          if (any && x1 > 0 && y1 > 0 && x0 < w && y0 < h && (x1 - x0) >= 6 && (y1 - y0) >= 12) {
+            out.push([Math.round(x0), Math.round(y0), Math.round(x1 - x0), Math.round(y1 - y0)]);
+          }
+        }
+        return { bots: out };
+      });
+    }
     // Per-shot cost, not one reading at the end of the run. Presets differ by
     // 2x in draw calls and the aggregate hid that completely — every previous
     // report quoted whatever the last preset happened to cost. fps is the
@@ -299,6 +544,22 @@ async function main() {
     const s = window.__COD__?.stats;
     return s ? { fps: Math.round(s.fps), drawCalls: s.drawCalls, triangles: s.triangles, programs: s.programs } : null;
   });
+  if (CHECK) {
+    try {
+      result.checks = await runChecks(browser, result.shots, probes);
+      const all = result.checks.flatMap((c) => c.findings);
+      result.checkSummary = {
+        run: all.length,
+        // Advisories are separated because two of these checks are heuristics
+        // standing in for a depth test we cannot do; treating them as gates
+        // would train the next agent to ignore the whole block.
+        failed: all.filter((f) => !f.pass && !f.advisory).map((f) => `${f.check}=${f.value} (want ${f.target})`),
+        advisory: all.filter((f) => !f.pass && f.advisory).map((f) => `${f.check}=${f.value} (want ${f.target})`),
+      };
+    } catch (e) {
+      result.checks = { error: e.message };
+    }
+  }
   result.errors = consoleErrors.slice(0, 40);
 
   await browser.close();
