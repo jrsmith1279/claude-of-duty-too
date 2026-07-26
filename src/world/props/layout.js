@@ -83,6 +83,7 @@ export class Site {
     this.gy = new Float32Array(n);        // floor height
     this.dist = new Float32Array(n);      // metres to nearest blocked cell
     this.wallN = new Int8Array(n * 2);    // outward normal of the nearest wall
+    this.wallD = new Float32Array(n);     // measured metres to that wall face
     this.corner = new Uint8Array(n);      // how many of 4 probes hit a wall
     this.indoor = new Uint8Array(n);      // roofed over
     this.step = new Float32Array(n);      // biggest height step to a neighbour
@@ -237,6 +238,7 @@ export class Site {
       this.corner[i] = hits;
       this.wallN[i * 2] = bx;
       this.wallN[i * 2 + 1] = bz;
+      this.wallD[i] = best < 0 ? 0 : best;
     }
   }
 
@@ -268,18 +270,22 @@ export class Site {
         const ax = this.xOf(ix), az = this.zOf(iz);
         const bx = this.xOf(jx - sx), bz = this.zOf(jz - sz);
         const base = this.gy[i];
-        // The face sits `dist` metres away from the sampled cell centre.
-        const off = this.dist[i];
-        const fx = ax + nxv * -off, fz = az + nzv * -off;
-        const top = this._wallTop(fx + nxv * 0.25, fz + nzv * 0.25, base);
+        // The horizontal probe measured the real distance to the face; the
+        // chamfer distance is quantised to the grid and would put the facade
+        // line up to half a cell inside the masonry.
+        const off = this.wallD[i] || this.dist[i];
+        const fx = ax - nxv * off, fz = az - nzv * off;
+        // Sample the height 25 cm *inside* the wall. Probing outside it just
+        // measures the pavement, which is why this used to reject every facade.
+        const top = this._wallTop(fx - nxv * 0.25, fz - nzv * 0.25, base);
         if (top - base < 2.2) continue;
         this.facades.push({
-          ax: ax + nxv * -off, az: az + nzv * -off,
-          bx: bx + nxv * -off, bz: bz + nzv * -off,
+          ax: fx, az: fz,
+          bx: bx - nxv * off, bz: bz - nzv * off,
           nx: nxv, nz: nzv,
           len: Math.hypot(bx - ax, bz - az) + GRID_STEP,
           top, base,
-          surface: this._surfaceAt(fx + nxv * 0.2, fz + nzv * 0.2, base + 1.4, -nxv, -nzv),
+          surface: this._surfaceAt(fx + nxv * 0.35, fz + nzv * 0.35, base + 1.4, -nxv, -nzv),
         });
       }
     }

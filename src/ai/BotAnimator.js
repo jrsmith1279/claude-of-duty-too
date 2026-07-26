@@ -45,10 +45,18 @@ const ANKLE_Y = REST.footL.y;                       // sole on the ground = ankl
 const LEG_MAX = (LIMB.thigh + LIMB.shin) * 0.985;
 const ARM_MAX = (LIMB.upperArm + LIMB.forearm) * 0.995;
 const HIP_HALF = LIMB.hipHalf;
+// How far a rolled foot lifts and pulls its ankle back toward the hip.
+const ROLL_LIFT = 0.118;
+const ROLL_PULL = 0.10;
 
+// Standing hip height is deliberately 3.5 cm below the rest pose's 0.940. At
+// 0.940 the leg is dead straight — the rig's hip-to-ankle distance is 0.841 and
+// the drop from hip to ankle is 0.840 — so there is literally no fore-aft
+// budget left and the first step drives the pelvis into a squat. A soldier
+// stands with soft knees anyway.
 const STANCE = {
-  stand: { hip: 0.940, lean: 0.02, width: 1.00, eye: 1.664 },
-  crouch: { hip: 0.700, lean: 0.16, width: 1.30, eye: 1.240 },
+  stand: { hip: 0.905, lean: 0.02, width: 1.00, eye: 1.630 },
+  crouch: { hip: 0.665, lean: 0.16, width: 1.30, eye: 1.205 },
 };
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -113,6 +121,7 @@ class Foot {
     this.pitch = 0;
     this.heel = 0;
     this.heelLift = 0;
+    this.lead = 0;
     this.nx = 0;
     this.nz = 0;
   }
@@ -218,7 +227,7 @@ export class BotAnimator {
     const running = speed > 2.7;
     // 0.75 m step at a 1.4 m/s walk, 1.25 m at a 4.5 m/s run.
     const stride = THREE.MathUtils.clamp(0.46 + speed * 0.175, 0.42, 1.28) * (1 - crouch * 0.28);
-    const swingTime = THREE.MathUtils.clamp(0.34 - speed * 0.030, 0.15, 0.34);
+    const swingTime = THREE.MathUtils.clamp(0.38 - speed * 0.020, 0.26, 0.38);
     const c = Math.cos(this.yaw), sn = Math.sin(this.yaw);
     const invSpeed = speed > 1e-3 ? 1 / speed : 0;
 
@@ -268,7 +277,7 @@ export class BotAnimator {
 
       f.pos.copy(f.plant);
       // Toe-off: `heel` is set by the hip solver when the leg runs out of reach.
-      f.pitch = damp(f.pitch, f.heel * 0.62, 16, dt);
+      f.pitch = damp(f.pitch, f.heel * (f.lead < 0 ? 0.62 : -0.42), 16, dt);
 
       const err = Math.hypot(f.plant.x - f.nx, f.plant.z - f.nz);
       const yawErr = Math.abs(shortAngle(f.plantYaw - this.yaw));
@@ -303,8 +312,13 @@ export class BotAnimator {
     const f = this.feet[want];
     f.prev.copy(f.pos);
     f.prevYaw = f.plantYaw;
-    // Land half a stride ahead of where the body will be at touchdown.
-    const ahead = speed > 0.3 ? swingTime + stride * 0.5 * invSpeed : 0;
+    // Land half a stride ahead of where the body will be at touchdown — but
+    // never further ahead than the leg can reach, or the pelvis has to dive to
+    // meet the foot on the frame it lands. At a run the extra step length comes
+    // out of the flight phase instead, which is where it comes from in life.
+    const ahead = speed > 0.3
+      ? swingTime + Math.min(stride * 0.5, 0.36) * invSpeed
+      : 0;
     f.target.set(
       f.nx + s.velocity.x * ahead,
       s.pos.y,
@@ -339,6 +353,7 @@ export class BotAnimator {
     const lxR = (fR.pos.x - s.pos.x) * c - (fR.pos.z - s.pos.z) * sn;
     const lzR = (fR.pos.x - s.pos.x) * sn + (fR.pos.z - s.pos.z) * c;
     const spread = Math.hypot(lxL - lxR, lzL - lzR);
+    fL.lead = lzL; fR.lead = lzR;
 
     // The pelvis is lowest when the feet are furthest apart — that IS the bob.
     let hipTarget = s.pos.y + hipBase - Math.min(Math.max(spread - 0.2, 0) * 0.075, 0.06);
@@ -357,8 +372,11 @@ export class BotAnimator {
         const dxz = Math.hypot(f.pos.x - jx, f.pos.z - jz);
         const vert = Math.sqrt(Math.max(LEG_MAX * LEG_MAX - dxz * dxz, 0.02));
         let limit = f.pos.y + ANKLE_Y + vert + (REST.hips.y - REST.thighL.y);
+        // Contact roll, demand-driven: the foot only comes off flat when the
+        // leg is running out of reach, and it rolls the way the geometry
+        // wants — onto the toe behind the body, onto the heel in front of it.
         f.heel = THREE.MathUtils.clamp((hipTarget - limit) / 0.14, 0, 1);
-        limit += f.heel * 0.118;
+        limit += f.heel * ROLL_LIFT;
         hipTarget = Math.min(hipTarget, Math.max(limit, f.pos.y + 0.46));
       }
     }
@@ -418,12 +436,16 @@ export class BotAnimator {
       // Sole (world) -> ankle target (rig space). A raised heel pivots the
       // ankle up and forward over the ball of the foot.
       const wx = f.pos.x - s.pos.x, wz = f.pos.z - s.pos.z;
-      const heel = f.heel || 0;
+      const heel = f.heel;
       const yawRel0 = shortAngle(f.plantYaw - this.yaw);
+      // Rolling onto the toe (or the heel) lifts the ankle and pulls it back
+      // toward the hip; `f.lead` is the signed fore-aft offset that decides
+      // which end of the foot is still on the ground.
+      const roll = heel * ROLL_PULL * (f.lead < 0 ? 1 : -1);
       _a.set(
-        c * wx - sn * wz + Math.sin(yawRel0) * heel * 0.10,
-        f.pos.y - s.pos.y + ANKLE_Y + heel * 0.118,
-        sn * wx + c * wz + Math.cos(yawRel0) * heel * 0.10,
+        c * wx - sn * wz,
+        f.pos.y - s.pos.y + ANKLE_Y + heel * ROLL_LIFT,
+        sn * wx + c * wz + roll,
       );
 
       const thighRest = f.side < 0 ? REST.thighL : REST.thighR;

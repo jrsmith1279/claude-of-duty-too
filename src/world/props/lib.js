@@ -221,7 +221,9 @@ export function fixWindingConvex(geo) {
  * @param {number[]} [squash] per-axis scale applied after displacement
  */
 export function lumpGeo(r, amp, squash = [1, 1, 1], detail = 0, seed = 0) {
-  const geo = new THREE.IcosahedronGeometry(r, detail).toNonIndexed();
+  // IcosahedronGeometry is already non-indexed; calling toNonIndexed() on
+  // it only earns a console warning.
+  const geo = new THREE.IcosahedronGeometry(r, detail);
   const pos = geo.attributes.position;
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);

@@ -401,9 +401,10 @@ export function reload(g, stage, weaponId, o = {}) {
     for (let i = 0; i < 3; i++) click(t + 0.05 + rnd() * 0.12, 2400 + rnd() * 2200, 16, 0.08, 0.02);
     life = 0.5;
   } else if (s.includes('in') || s.includes('insert') || s.includes('new')) {
-    thunk(t, 210, 0.44, 0.055);
-    click(t + 0.006, 1800, 5, 0.30, 0.03);
-    gearRustle(g, ac, dest, t - 0.04, 0.7);
+    // The hand arrives before the magazine does, so the cloth leads the thunk.
+    gearRustle(g, ac, dest, t, 0.7);
+    thunk(t + 0.045, 210, 0.44, 0.055);
+    click(t + 0.051, 1800, 5, 0.30, 0.03);
   } else if (s.includes('seat') || s.includes('slap') || s.includes('home')) {
     thunk(t, 165, 0.62, 0.075);
     click(t + 0.003, 1300, 3.5, 0.40, 0.045);
