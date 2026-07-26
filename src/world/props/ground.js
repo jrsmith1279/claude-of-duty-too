@@ -167,6 +167,63 @@ function pools(rand) {
 
 const pick = (list, rand) => list[(rand() * list.length) | 0];
 
+// ------------------------------------------------------------------ ledger
+
+/**
+ * Makes "zero new draw calls" a property of the code rather than a claim in a
+ * commit message.
+ *
+ * A `BatchSet` emits one mesh per `material | zone | castsShadow` bucket, and a
+ * shadow-casting bucket costs one draw per cascade on top of its own — four
+ * draws for one mesh, at three cascades. This module runs LAST in the prop
+ * build, so every bucket that any other module is going to open is already
+ * open when it starts; snapshotting the bucket keys on entry therefore says
+ * exactly which of its own pieces would open a new one.
+ *
+ * That was not a hypothetical. Measured on this map, the kerb runs the full
+ * length of the street and reaches `core`'s third Z zone, where nothing else
+ * casts a shadow from `concrete_floor` — one new bucket, three draws, on a
+ * budget sitting at 348 of 350. A 150 mm kerbstone 70 m down the street
+ * contributes a shadow nobody can resolve, so the flag is simply dropped
+ * there. `shadowOk` is how that decision gets made per piece instead of by
+ * hard-coding a Z threshold that a level rewrite would invalidate.
+ */
+class Ledger {
+  constructor(pairs) {
+    this.sets = pairs.filter(([, s]) => !!s);
+    this.snap = new Map();
+    for (const [n, s] of this.sets) this.snap.set(n, new Set(s.buckets.keys()));
+  }
+
+  /**
+   * The shadow flag to place this piece with, or `null` for "do not place it".
+   *
+   * Preference order: the shadowed bucket if the caller wants one and it is
+   * already open, then the unshadowed one, then nothing. Declining to place a
+   * piece sounds drastic and is not: the only place it triggers on this map is
+   * `core`'s third Z zone, which is the last three metres of street before the
+   * far map edge, seventy metres from the player camera and under a pixel
+   * wide. Three draw calls is a bad price for that.
+   */
+  resolve(name, bs, key, z, wantShadow) {
+    const set = this.snap.get(name);
+    if (!set) return wantShadow;
+    const zone = bs.zoneOf(z);
+    if (wantShadow && set.has(`${key}|${zone}|1`)) return true;
+    if (set.has(`${key}|${zone}|0`)) return false;
+    return null;
+  }
+
+  /** Bucket ids this module opened that nobody else had. Should be empty. */
+  opened() {
+    const out = [];
+    for (const [n, s] of this.sets) {
+      for (const k of s.buckets.keys()) if (!this.snap.get(n).has(k)) out.push(`${n}/${k}`);
+    }
+    return out;
+  }
+}
+
 /** Value noise in one dimension, for a thickness that wanders along a line. */
 function fbm1(t) {
   let v = 0, a = 0.5, f = 1;
@@ -194,7 +251,7 @@ function fbm1(t) {
  * the eye uses to tell a photograph from a model, so they are the whole point
  * of this pass rather than a garnish on it.
  */
-function kerbCourse(runs, bs, rand, density) {
+function kerbCourse(runs, bs, rand, density, ledger) {
   let parts = 0;
   const yawJit = 0.4 * Math.PI / 180;
   for (const run of runs) {
@@ -217,6 +274,8 @@ function kerbCourse(runs, bs, rand, density) {
       const x = alongX(run, t) - run.nx * back;
       const z = alongZ(run, t) - run.nz * back;
 
+      const shadow = ledger.resolve('core', bs, 'concrete_floor', z, true);
+      if (shadow === null) continue;
       const broken = rand() < (1 / 6) * density;
       const geo = broken ? pick(POOL.broken, rand) : pick(POOL.kerb, rand);
       // Granite is a good deal darker than the concrete_floor base tint, and
@@ -226,7 +285,7 @@ function kerbCourse(runs, bs, rand, density) {
       bs.add('concrete_floor', geo,
         x, yTop - h / 2, z,
         0, run.yaw + (rand() - 0.5) * 2 * yawJit, 0,
-        1, h / 0.15, 1, _c, true);
+        1, h / 0.15, 1, _c, shadow);
       parts++;
     }
   }
@@ -242,7 +301,7 @@ function kerbCourse(runs, bs, rand, density) {
  * rather than ending on an edge, so every run tapers over its first and last
  * 1.5 m and the thickness is a noise field, not a constant.
  */
-function gutterDrift(runs, core, fine, site, rand, density, skip) {
+function gutterDrift(runs, core, fine, site, rand, density, skip, ledger) {
   let pieces = 0;
   const STEP = 0.25;
   for (const run of runs) {
@@ -255,6 +314,8 @@ function gutterDrift(runs, core, fine, site, rand, density, skip) {
         if (Math.abs(g.x - x0) < 0.55 && Math.abs(g.z - z0) < 0.55) { blocked = true; break; }
       }
       if (blocked) continue;
+      if (ledger.resolve('core', core, 'dirt', z0, false) === null) continue;
+      const gritOk = ledger.resolve('fine', fine, 'gravel', z0, false) !== null;
       const ly = lowAt(run, t);
       const lee = site.leeAt(x0 + run.nx * 0.4, z0 + run.nz * 0.4);
       const leeK = Math.max(0.2, Math.min(1.0, lee));
@@ -287,7 +348,7 @@ function gutterDrift(runs, core, fine, site, rand, density, skip) {
 
       // A handful of individually resolvable stones on top, so the drift does
       // not read as a smooth extruded fillet up close.
-      const n = 3 + ((rand() * 4) | 0);
+      const n = gritOk ? 3 + ((rand() * 4) | 0) : 0;
       for (let i = 0; i < n * density; i++) {
         const along = (rand() - 0.5) * STEP * 1.4;
         const across = (rand() - 0.5) * halfW * 1.7;
@@ -315,7 +376,7 @@ function gutterDrift(runs, core, fine, site, rand, density, skip) {
  * is a near-black recess with bars over it, because a dark hole is what reads
  * at 10 m and the bars are what reads at 2 m.
  */
-function gullies(runs, core, fine, hard, kit, site, rand) {
+function gullies(runs, core, fine, hard, kit, site, rand, ledger) {
   const placed = [];
   let parts = 0;
   for (const run of runs) {
@@ -326,13 +387,16 @@ function gullies(runs, core, fine, hard, kit, site, rand) {
       const x = alongX(run, t) + run.nx * 0.20;
       const z = alongZ(run, t) + run.nz * 0.20;
       if (!site.free(x, z, 0.45)) continue;
+      const shadow = ledger.resolve('core', core, 'concrete_floor', z, true);
+      const gritOk = ledger.resolve('fine', fine, 'metal_rusted', z, false);
+      if (shadow === null || gritOk === null) continue;
       site.occupy(x, z, 0.35);
       placed.push({ x, z, y: ly, yaw: run.yaw });
 
       jitterColor(_c, rand, 0.14, 0.02, 0.01);
       _c.multiplyScalar(0.78);
       core.add('concrete_floor', POOL.frame, x, ly - 0.010, z, 0, run.yaw, 0,
-        1, 1, 1, _c, true);
+        1, 1, 1, _c, shadow);
       parts++;
       // The opening. Almost black, and 60 mm down, so it reads as a hole.
       _c2.setRGB(0.30, 0.30, 0.30);
@@ -408,18 +472,25 @@ export function groundworks(ctx, site, decalHard, rand, density = 1, env = {}) {
   const runs = kerbRuns(site);
   if (!runs.length) return { pieces: 0 };
 
-  let pieces = kerbCourse(runs, core, rand, density);
-  const g = gullies(runs, core, fine, hard, kit, site, rand);
+  const ledger = new Ledger([['core', core], ['fine', fine], ['soft', soft], ['hard', hard]]);
+
+  let pieces = kerbCourse(runs, core, rand, density, ledger);
+  const g = gullies(runs, core, fine, hard, kit, site, rand, ledger);
   pieces += g.parts;
-  pieces += gutterDrift(runs, core, fine, site, rand, density, g.placed);
+  pieces += gutterDrift(runs, core, fine, site, rand, density, g.placed, ledger);
   if (soft) pieces += dampHalos(g.placed, soft, kit, rand);
+
+  // Reported, not asserted: a bucket this module opened alone is a draw-call
+  // regression, and it should be visible without re-running the A/B.
+  const opened = ledger.opened();
+  if (opened.length) console.warn('[groundworks] opened new batch buckets', opened);
 
   // The pavement surface itself is item 3's material swap on Level.js at zero
   // draws. Laying our own paver slab over the top would cost a draw and would
   // z-fight whatever is already there, so it is deliberately not done — see
   // the report if `paver` is present and the pavement still looks like
   // concrete.
-  return { pieces, runs: runs.length };
+  return { pieces, runs: runs.length, newBuckets: opened };
 }
 
 export { kerbRuns };
