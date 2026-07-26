@@ -4,6 +4,7 @@ import { AtmosphereLUT } from './sky/AtmosphereLUT.js';
 import { CloudCache } from './sky/CloudCache.js';
 import { NoiseVolume } from './sky/NoiseVolume.js';
 import { SkyDome } from './sky/SkyDome.js';
+import { Backdrop } from './sky/Backdrop.js';
 import { installAerialPerspective, AP } from './sky/AerialPerspective.js';
 import {
   SKY_EXPOSURE, MOON_SCATTER_LIFT, CLOUD_SUN_GAIN, MAX_DISK_RADIANCE,
@@ -77,16 +78,25 @@ export class SkySystem {
 
     ctx.scene.add(this.dome.mesh);
 
+    // Everything between the level's 150 m plate and the sky. One draw, no
+    // shadow cast, no physics: see sky/Backdrop.js for why a hard ground rim
+    // has to be occluded rather than fogged away.
+    try {
+      this.backdrop = new Backdrop(ctx.scene);
+    } catch (e) {
+      console.warn('Sky: backdrop build failed, horizon will be bare', e);
+    }
+
     // Height fog: the fallback colour matters only for materials that miss the
     // shared uniform; the real work happens in the patched chunk.
     this.fog = new THREE.FogExp2(0x8fa8c0, 0.0045);
     ctx.scene.fog = this.fog;
     AP.enabled = true;
-    AP.density = 0.0052;
+    AP.density = 0.0042;
     AP.heightFalloff = 0.011;
-    AP.maxOpacity = 0.85;
-    AP.anisotropy = 0.62;
-    AP.startDistance = 3;
+    AP.maxOpacity = 0.90;
+    AP.anisotropy = 0.45;
+    AP.startDistance = 6;
     AP.referenceHeight = 0;
     AP.groundFalloff = 0.40;
 
@@ -257,7 +267,15 @@ export class SkySystem {
 
     // Aerial perspective feed.
     AP.setSunDir(eph.sunDirection);
-    _c.copy(this.horizonColor).multiplyScalar(0.82);
+    // Inscatter colour on the horizontal. MEASURED, not chosen: at 0.82 this is
+    // the radiance of the brightest 3 degrees of sky, and the shader hands it
+    // to every near-horizontal fragment, so the haze came out equal to or
+    // brighter than the sky above it at every distance. Distant geometry then
+    // landed within 0-8 sRGB levels of the sky in the establishing shot and the
+    // far city read as white paper cut-outs. 0.66 puts the far ring 25-40
+    // levels under the sky, which is where a real hazy skyline sits, and it
+    // also stops the mid-ground reading as glare rather than as dust.
+    _c.copy(this.horizonColor).multiplyScalar(0.66);
     _c.r += u.uPollution.value.x * 0.75;
     _c.g += u.uPollution.value.y * 0.75;
     _c.b += u.uPollution.value.z * 0.75;
@@ -271,11 +289,21 @@ export class SkySystem {
     // radiance so haze against sky still separates from the sky itself.
     _c.copy(this.skyColor).multiplyScalar(0.90);
     AP.setZenithColor(_c);
-    // ART_DIRECTION.md wants heavy airborne dust: visibly desaturated and
-    // lifted blacks past 40 m. At 0.0052/m that is ~19% opacity at 40 m, ~30%
-    // at 70 m (the market street's long sightline) and ~0.6 at 200 m, which
-    // reads as three depth planes without erasing the far one.
-    AP.density = 0.00520 + 0.00230 * (1 - eph.intensity);
+    // Aerial perspective is now being asked to separate FIVE depth planes, not
+    // three: street, ring A at ~140 m, ring B at ~380 m, and two mountain
+    // ribbons at 1.25 and 2.1 km. The old 0.0052 saturated the 0.85 cap at
+    // 365 m, so everything past ring B was one flat sheet and the two ridges
+    // could not read as different distances.
+    //
+    // The ladder this hits, opacity = (1 - exp(-tau)) * maxOpacity, at eye
+    // height with the sun up:
+    //   25 m 0.09 / 40 m 0.14 / 70 m 0.23 / 145 m 0.41 / 370 m 0.71
+    //   900 m 0.88 / 2100 m 0.90
+    // At the cap the far ridge still contributes 10% of its own radiance,
+    // which is the 7-9% contrast against bright sky that a real distant range
+    // has. Do not push past 0.92 (the ridge disappears) or below 0.88 (2 km
+    // and 20 km stop separating).
+    AP.density = 0.00420 + 0.00190 * (1 - eph.intensity);
     AP.heightFalloff = 0.011;
 
     // Fallback colour for anything that misses the shared uniform.
@@ -403,6 +431,7 @@ export class SkySystem {
   }
 
   dispose() {
+    this.backdrop?.dispose();
     this.lut?.dispose();
     this.clouds?.dispose();
     this.noise?.dispose();

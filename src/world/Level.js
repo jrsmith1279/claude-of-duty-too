@@ -84,9 +84,9 @@ export class LevelSystem {
 
     ctx.scene.add(root);
 
-    // The ground plane is 400 m of nothing, so the bounds are the playable
-    // shell rather than `setFromObject` — the cascade fit reads this, and a
-    // 400 m sphere would spend every shadow texel on empty tarmac.
+    // The ground plane is 150 m of mostly nothing, so the bounds are the
+    // playable shell rather than `setFromObject` — the cascade fit reads this,
+    // and a 150 m sphere would spend every shadow texel on empty tarmac.
     const bounds = new THREE.Box3(
       new THREE.Vector3(-46, 0, -52),
       new THREE.Vector3(46, 22, 46)
@@ -139,10 +139,21 @@ export class LevelSystem {
   }
 
   _buildGround(ctx) {
-    // A large ground plane so the horizon is aerial haze rather than a hard
-    // edge into the sky dome, then the carriageway and pavements on top.
-    const planeGeo = new THREE.PlaneGeometry(400, 400);
-    planeGeo.attributes.uv.array.forEach((_, i, a) => { a[i] *= 400; });
+    // This used to be 400 x 400. Its rim landed at 200 m, where the aerial
+    // perspective has only reached 55% opacity, so 45% of the plate's own dark
+    // value survived and it drew a hard horizontal band with clean sky above
+    // it — the "world ends here" line across establishing.png. It also spent
+    // 93% of its rasterised pixels outside anything the player can reach, and
+    // at grazing angles the far half of it read as a sheet of wet mirror.
+    //
+    // 150 x 150 instead, and the ground beyond it is sky/Backdrop.js's shell at
+    // y = -0.08. The plate stays at y = -0.02 so the two are never coincident;
+    // its edge midpoints sit at 75 m and its corners at 106 m, both outside the
+    // shell's r = 74 inner rim, so the plate always overhangs and hides the
+    // seam. Do NOT restore the 400 m plane alongside the shell: two materials
+    // at one height draw a visible 200 m square outline.
+    const planeGeo = new THREE.PlaneGeometry(150, 150);
+    planeGeo.attributes.uv.array.forEach((_, i, a) => { a[i] *= 150; });
     planeGeo.attributes.uv.needsUpdate = true;
     const plane = new THREE.Mesh(planeGeo, ctx.materials.get('asphalt_worn'));
     plane.rotation.x = -Math.PI / 2;
