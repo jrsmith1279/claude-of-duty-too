@@ -508,8 +508,11 @@ export class WeaponSystem {
       const want = hit ? clamp(hit.distance, 3, 160) : 70;
       this._focus = this._focus === undefined ? want : this._focus + (want - this._focus) * (1 - Math.exp(-5 * dt));
       fx.set('dofFocus', this._focus);
-      fx.set('dofRange', 2.4);
-      fx.set('dofRadius', 4.0);
+      // Wide range, small radius: enough separation to read as an eye focused
+      // downrange, not enough to stop the player identifying what they are
+      // aiming at. Call of Duty keeps the world sharp under ADS.
+      fx.set('dofRange', 3.2);
+      fx.set('dofRadius', 2.6);
     } else if (this._dofSaved !== undefined) {
       fx.set('dofFocus', this._dofSaved.focus);
       fx.set('dofRange', this._dofSaved.range);

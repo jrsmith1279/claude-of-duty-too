@@ -48,7 +48,7 @@ export const GUN_MATERIALS = {
   // bloom, so it flares the way a real illuminated reticle does. The scale is
   // set against a sunlit street metering at ~2 units, so it has to be an order
   // of magnitude over that to survive auto-exposure.
-  dot: ['gun_polymer', { color: 0x000000, roughness: 1, envMapIntensity: 0, emissive: 0xff1405, emissiveIntensity: 9.5 }],
+  dot: ['gun_polymer', { color: 0x000000, roughness: 1, envMapIntensity: 0, emissive: 0xff1204, emissiveIntensity: 5.0 }],
   tritium: ['gun_polymer', { color: 0x02120a, roughness: 0.9, envMapIntensity: 0, emissive: 0x39ff9a, emissiveIntensity: 6 }],
   wood: ['gun_wood', { uvScale: 5, envMapIntensity: 0.6 }],
   brass: ['gun_metal', { uvScale: 12, roughness: 0.34, color: 0xc79a4c, metalness: 1, envMapIntensity: 0.7 }],

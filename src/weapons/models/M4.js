@@ -273,7 +273,7 @@ export function buildM4(resolve) {
 
     // The reticle. A sphere so it stays round from every angle; emissive lands
     // in the HDR viewmodel buffer, so bloom gives it the halo a real dot has.
-    const dot = new THREE.Mesh(sphere(0.00105, 10), resolve('dot'));
+    const dot = new THREE.Mesh(sphere(0.00125, 10), resolve('dot'));
     dot.name = 'reddot';
     dot.position.set(0, OPTIC_Y, OPTIC_Z - 0.0180);
     dot.frustumCulled = false;

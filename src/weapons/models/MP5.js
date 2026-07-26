@@ -163,7 +163,7 @@ export function buildMP5(resolve) {
     p.add('steel', knurled(0.0074, 0.0080, 16), { y: OPTIC_Y + OPTIC_R + 0.0095, z: OPTIC_Z + 0.0030, rx: Math.PI / 2 });
     p.add('black', knurled(0.0112, 0.0085, 20), { x: -(OPTIC_R + 0.0028), y: OPTIC_Y, z: OPTIC_Z - 0.0040, rz: Math.PI / 2 });
 
-    const dot = new THREE.Mesh(sphere(0.00105, 10), resolve('dot'));
+    const dot = new THREE.Mesh(sphere(0.00125, 10), resolve('dot'));
     dot.name = 'reddot';
     dot.position.set(0, OPTIC_Y, OPTIC_Z - 0.0170);
     dot.frustumCulled = false;

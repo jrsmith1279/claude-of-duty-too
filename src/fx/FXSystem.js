@@ -349,6 +349,7 @@ export class FXSystem {
    * `headDistance` metres from the camera.
    */
   _tracerToward(from, to, speed, headDistance, opts) {
+    _stageOpts.trail = opts?.trail ?? 7.0;
     _v3.set(to.x - from.x, to.y - from.y, to.z - from.z);
     const total = _v3.length();
     if (total < 0.5) return;
@@ -583,28 +584,28 @@ export class FXSystem {
     // the camera. Freezing one at the lens turns it into a full-screen bloom
     // smear that reads as a lens artefact rather than as a bullet.
     _p.copy(camPos).addScaledVector(_right, 2.3).addScaledVector(_up, 0.30).addScaledVector(_fwd, -6);
-    this._tracerToward(enemy, _p, 880, 7.0, { width: 0.038, intensity: 6.5 });
+    this._tracerToward(enemy, _p, 880, 6.0, { width: 0.046, intensity: 7.0 });
 
     _p.copy(camPos).addScaledVector(_right, -1.9).addScaledVector(_up, -0.35).addScaledVector(_fwd, -5);
-    this._tracerToward(far, _p, 900, 11.0, { width: 0.032, intensity: 5.0 });
+    this._tracerToward(far, _p, 900, 10.0, { width: 0.038, intensity: 5.8 });
 
     if (A.hit) {
       _p.copy(camPos).addScaledVector(_right, 0.20).addScaledVector(_up, -0.10).addScaledVector(_fwd, 0.62);
       this.tracers.fire(_p, A.point, 900, {
-        age: (A.distance / 900) * 0.45, width: 0.032, intensity: 5.5,
+        age: (A.distance / 900) * 0.45, width: 0.038, intensity: 6.4,
         color: [1.0, 0.86, 0.45],
       });
     }
     // A third, high and crossing, so the rounds are not all parallel.
     _v.copy(camPos).addScaledVector(_fwd, 30).addScaledVector(_right, -9).addScaledVector(_up, 3.0);
     _p.copy(camPos).addScaledVector(_right, 7).addScaledVector(_up, 2.4).addScaledVector(_fwd, 6);
-    this._tracerToward(_v, _p, 850, 9.0, { width: 0.028, intensity: 4.2 });
+    this._tracerToward(_v, _p, 850, 9.0, { width: 0.034, intensity: 5.0 });
 
     // Return fire crossing the other way and low, so the frame has rounds going
     // in both directions rather than one converging fan.
     _v.copy(camPos).addScaledVector(_fwd, 4).addScaledVector(_right, 5.5).addScaledVector(_up, 0.1);
     _p.copy(camPos).addScaledVector(_fwd, 26).addScaledVector(_right, -7.0).addScaledVector(_up, 0.9);
-    this._tracerToward(_v, _p, 900, 10.0, { width: 0.030, intensity: 5.2, color: [1.0, 0.9, 0.55] });
+    this._tracerToward(_v, _p, 900, 10.0, { width: 0.036, intensity: 6.0, color: [1.0, 0.9, 0.55] });
 
     // --- brass in the air ------------------------------------------------------
     for (let i = 0; i < 5; i++) {
@@ -771,4 +772,4 @@ const _groundHit = makeHit();
 const _wallScan = makeHit();
 const _stageHitB2 = makeHit();
 const _scratchCam = new THREE.Vector3();
-const _stageOpts = { age: 0, width: 0.02, intensity: 3.5, color: null };
+const _stageOpts = { age: 0, width: 0.02, intensity: 3.5, color: null, trail: 7 };
