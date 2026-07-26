@@ -33,10 +33,13 @@ export class Compass {
     const k = this.k = Math.min(Math.max(h / 900, 0.85), 1.5);
     this.cx = Math.round(w * 0.5);
     this.y = Math.round(Math.min(w, h) * 0.040);
-    this.halfW = Math.round(Math.min(w * 0.21, 270 * k));
-    this.fCard = font(600, 12.5 * k);
-    this.fSub = font(500, 9.5 * k);
-    this.fObj = font(700, 9.5 * k);
+    // Wide enough that the ribbon reads as a ribbon. At 21 % of the frame the
+    // 90-degree window only ever showed two or three marks and looked like a
+    // stray glyph rather than a compass.
+    this.halfW = Math.round(Math.min(w * 0.30, 430 * k));
+    this.fCard = font(600, 14 * k);
+    this.fSub = font(500, 10.5 * k);
+    this.fObj = font(700, 10 * k);
   }
 
   update(dt, s, ctx) {
@@ -96,15 +99,32 @@ export class Compass {
     const pxPerDeg = halfW / (SPAN_DEG * 0.5);
     const heading = s.bearing;   // degrees, 0 = north, clockwise
 
-    // Baseline rule, fading at both ends.
+    // Baseline rule, fading at both ends. Two passes: a dark one a pixel below
+    // the light one. Every mark on this strip is a hairline sitting over a
+    // blown-out sky, and a single 26 %-alpha white pixel row simply does not
+    // survive that — the dark shoulder is what makes the ribbon legible.
     noShadow(c);
-    const grad = c.createLinearGradient(cx - halfW, 0, cx + halfW, 0);
-    grad.addColorStop(0, rgba(PAL.white, 0));
-    grad.addColorStop(0.28, rgba(PAL.white, 0.16 * a));
-    grad.addColorStop(0.72, rgba(PAL.white, 0.16 * a));
-    grad.addColorStop(1, rgba(PAL.white, 0));
-    c.fillStyle = grad;
+    if (!this._grad || this._gradFor !== halfW) {
+      this._gradFor = halfW;
+      const g = c.createLinearGradient(cx - halfW, 0, cx + halfW, 0);
+      g.addColorStop(0, 'rgba(255,255,255,0)');
+      g.addColorStop(0.22, 'rgba(255,255,255,0.24)');
+      g.addColorStop(0.78, 'rgba(255,255,255,0.24)');
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      this._grad = g;
+      const gd = c.createLinearGradient(cx - halfW, 0, cx + halfW, 0);
+      gd.addColorStop(0, 'rgba(0,0,0,0)');
+      gd.addColorStop(0.22, 'rgba(0,0,0,0.40)');
+      gd.addColorStop(0.78, 'rgba(0,0,0,0.40)');
+      gd.addColorStop(1, 'rgba(0,0,0,0)');
+      this._gradDark = gd;
+    }
+    c.globalAlpha = a;
+    c.fillStyle = this._gradDark;
+    c.fillRect(cx - halfW, y + 16 * k, halfW * 2, 1);
+    c.fillStyle = this._grad;
     c.fillRect(cx - halfW, y + 15 * k, halfW * 2, 1);
+    c.globalAlpha = 1;
 
     c.textAlign = 'center';
     c.textBaseline = 'alphabetic';
