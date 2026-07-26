@@ -2,7 +2,7 @@ import { PAL, rgba, clamp01, easeOutCubic } from './theme.js';
 
 const MAX = 6;
 const LIFE = 1.2;          // spec: fade over 1.2 s
-const SPAN = 0.52;         // arc width, radians (~30 degrees)
+const SPAN = 0.62;         // arc width, radians (~36 degrees)
 const SEGS = 9;
 
 /**
@@ -29,7 +29,7 @@ export class Indicators {
   layout(w, h) {
     this.cx = w * 0.5;
     this.cy = h * 0.5;
-    this.r = Math.min(w, h) * 0.30;
+    this.r = Math.min(w, h) * 0.285;
     this.k = Math.min(Math.max(h / 900, 0.85), 1.5);
   }
 
@@ -89,7 +89,7 @@ export class Indicators {
           const aa = a * win * s.power;
           if (aa <= 0.02) continue;
           c.strokeStyle = outline ? rgba(PAL.ink, aa * 0.45) : rgba(PAL.danger, Math.min(0.92, aa));
-          c.lineWidth = (outline ? 9 : 5.4) * k * (0.35 + 0.65 * win);
+          c.lineWidth = (outline ? 13 : 8.2) * k * (0.42 + 0.58 * win);
           c.beginPath();
           c.arc(cx, cy, r * grow, base + (t0 - 0.5) * SPAN, base + (t1 - 0.5) * SPAN);
           c.stroke();

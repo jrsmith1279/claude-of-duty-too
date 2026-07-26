@@ -103,7 +103,7 @@ export class Overlay {
     const a = s.alpha;
     const w = this.w, h = this.h;
 
-    const slow = Math.max(this.dmg * 0.42, this._low || 0) * a;
+    const slow = Math.max(this.dmg * 0.52, this._low || 0) * a;
     if (slow > 0.004) {
       c.globalAlpha = slow;
       c.fillStyle = this._gRed;
@@ -112,12 +112,12 @@ export class Overlay {
 
     const fast = easeOutCubic(clamp01(this.flash)) * a;
     if (fast > 0.004) {
-      c.globalAlpha = fast * 0.46;
+      c.globalAlpha = fast * 0.55;
       c.fillStyle = this._gEdge;
       c.fillRect(0, 0, w, h);
       // Directional bias: the quadrant the shot came from gets a hotter smear,
       // so the vignette itself carries some of the information the arcs do.
-      this._directional(c, fast * 0.52);
+      this._directional(c, fast * 0.62);
     }
 
     if (this.white > 0.004) {
