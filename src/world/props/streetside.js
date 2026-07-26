@@ -97,13 +97,19 @@ function geo() {
  */
 function kerbRuns(site, minLen) {
   const runs = [];
-  const seen = new Uint8Array(site.open.length);
+  let seen = null;
   const cell = (ix, iz) => {
     if (!site.inside(ix, iz)) return -1;
     const i = site.index(ix, iz);
     return site.open[i] && site.step[i] > 0.06 && site.dist[i] > 0.8 ? i : -1;
   };
+  // One visited map PER DIRECTION. Sharing it was a real bug: the X sweep ran
+  // first, chopped every kerb cell in the map into 1-2 cell runs that were
+  // then rejected for being too short, and left the whole grid marked visited,
+  // so the Z sweep — which is the one that finds the long kerbs down the main
+  // street — found nothing. Measured: 2 runs, both at the far map edge.
   for (const [sx, sz] of [[1, 0], [0, 1]]) {
+    seen = new Uint8Array(site.open.length);
     for (let iz = 0; iz < site.nz; iz++) {
       for (let ix = 0; ix < site.nx; ix++) {
         if (cell(ix, iz) < 0) continue;
@@ -125,20 +131,34 @@ function kerbRuns(site, minLen) {
     }
   }
   runs.sort((a, b) => b.len - a.len);
-  return runs;
+  // The two sweeps can both claim the same corner, so keep runs whose
+  // midpoints are at least 4 m apart. Without this the longest three are
+  // sometimes one kerb described three ways, and three guardrails land on top
+  // of each other.
+  const kept = [];
+  for (const r of runs) {
+    const mx = (r.ax + r.bx) / 2, mz = (r.az + r.bz) / 2;
+    if (kept.some((k) => Math.hypot((k.ax + k.bx) / 2 - mx, (k.az + k.bz) / 2 - mz) < 4)) continue;
+    kept.push(r);
+  }
+  return kept;
 }
 
 /** Pedestrian guardrail: posts, a top rail, a mid rail and 0.15 m infill. */
-function guardrail(bs, site, rand, r) {
+function guardrail(bs, site, rand, r, frac) {
   const g = geo();
   const ux = (r.bx - r.ax) / r.len, uz = (r.bz - r.az) / r.len;
   const yaw = Math.atan2(ux, uz);
   const L = Math.min(14, r.len);
-  const cx = r.ax + ux * L * 0.5, cz = r.az + uz * L * 0.5;
+  // Start somewhere along the run rather than always at its first cell. The
+  // longest kerb on this map is the whole 102 m street, and anchoring at s = 0
+  // put every railing at the far end of it, in the fog.
+  const s0 = (r.len - L) * frac;
   tintFor(_c, _w.set(0x8f9598), BASE_METAL_PAINTED, 2.6);
   const steel = _c.clone();
   let n = 0;
-  const put = (key, gm, s, oy, sx, sy, sz, col, shadow) => {
+  const put = (key, gm, s0i, oy, sx, sy, sz, col, shadow) => {
+    const s = s0 + s0i;
     const y = site.groundAt(r.ax + ux * s, r.az + uz * s);
     if (y === null) return;
     bs.bed(y);
@@ -168,7 +188,6 @@ function guardrail(bs, site, rand, r) {
   for (let k = 1; k < bars; k++) {
     put('metal_painted', g.infill, k * 0.15, 0.76, 1, 0.66, 1, _c, false);
   }
-  void cx; void cz;
   return n;
 }
 
@@ -291,9 +310,10 @@ export function streetside(ctx, site, core, rand, density = 1, env = null) {
   let parts = 0;
 
   const runs = kerbRuns(site, 8);
+  if (globalThis.window) window.__SSDBG__ = { runs: runs.slice(0, 6) };
   // Two or three guardrail runs, on the longest kerbs available.
   const nRail = Math.min(runs.length, Math.max(2, Math.round(3 * density)));
-  for (let i = 0; i < nRail; i++) parts += guardrail(bs, site, rand, runs[i]);
+  for (let i = 0; i < nRail; i++) parts += guardrail(bs, site, rand, runs[i], 0.32 + i * 0.24);
   // Bollards on the next kerbs along, so the two do not fight for the same
   // metre of pavement.
   for (let i = nRail; i < Math.min(runs.length, nRail + 3); i++) {
