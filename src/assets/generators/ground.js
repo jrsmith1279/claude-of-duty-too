@@ -12,16 +12,33 @@ export const GROUND = {
     // as a loose gravel bed rather than as bitumen with aggregate in it. Real
     // asphalt is a nearly flat surface whose stones are *visible* but not
     // *proud*. MATERIAL_DEFS carries the matching normalScale/pom cut.
-    bump: 0.62,
-    cavity: 0.55,
+    //
+    // These sit ABOVE the brief's 0.62 / 0.55 deliberately: the aggregate term
+    // in `s.h` has already been cut to 0.60 (see the note there), and both of
+    // these multiply that same field, so 0.95 x 0.60 and 0.85 x 0.60 land on
+    // the intended net figures without flattening the surface twice over.
+    bump: 0.95,
+    cavity: 0.85,
     glsl: /* glsl */ `
 /** Shared hot-rolled asphalt base. wear 0 = freshly laid, 1 = ravelled and cracked. */
 Surf asphaltBase(vec2 uv, float wear, float sd){
   Surf s = defaultSurf();
 
   // --- coarse aggregate sitting in a bitumen matrix
-  Cell a1 = cells2(warp1(uv * 54.0, vec2(54.0), 0.45, 2) + sd, vec2(54.0), 1.0);
-  Cell a2 = cells2(uv * 112.0 + 21.0, vec2(112.0), 1.0);
+  //
+  // AGGREGATE SIZE. On a 4 m tile the coarse cell used to run at 54, i.e. a
+  // 74 mm stone. That is not aggregate, it is a cobble: a surface course is
+  // nominally 10-20 mm and even a coarse binder course tops out around 40. At
+  // a 1.68 m eye height, 74 mm stones two metres in front of the player are
+  // several pixels across each and can be individually counted, which is the
+  // whole reason the carriageway read as a gravel bed rather than as a road.
+  // 92 puts the coarse stone at 43 mm and 170 puts the middle grade at 24 mm.
+  //
+  // The fine grade stays at 215 (18.6 mm). It is already under five texels at
+  // the 1024 the factory generates, and pushing it finer would mip to flat
+  // grey before two metres — which trades one wrong answer for another.
+  Cell a1 = cells2(warp1(uv * 92.0, vec2(92.0), 0.45, 2) + sd, vec2(92.0), 1.0);
+  Cell a2 = cells2(uv * 170.0 + 21.0, vec2(170.0), 1.0);
   Cell a3 = cells2(uv * 215.0 + 47.0, vec2(215.0), 1.0);
 
   float big   = 1.0 - smoothstep(0.17, 0.44, a1.f1);
@@ -55,8 +72,26 @@ Surf asphaltBase(vec2 uv, float wear, float sd){
   float grit = fbm01(uv * 300.0 + sd, vec2(300.0), 3, 2.0, 0.5);
   base += (grit - 0.5) * 0.024;
 
-  s.h = 0.35 + big * 0.38 + mid * 0.17 + small * 0.07 + (grit - 0.5) * 0.03;
-  s.ao = mix(0.45, 1.0, smoothstep(0.22, 0.70, s.h));
+  // AGGREGATE HEIGHT, CUT TO 0.60 OF WHAT IT WAS — and this, not the normal,
+  // is what was making cobbles.
+  //
+  // The bump setting only scales the derivative used to build the normal map.
+  // s.h is written to the height attachment, and SurfaceShader's parallax term
+  // displaces the UVs by pom * height, which is what carves a real silhouette
+  // round every stone and lets you count them at three metres. Turning bump
+  // down flattens the shading on a stone that is still physically there. The
+  // requested pom cut (0.01 -> 0.006) lives in MATERIAL_DEFS, which belongs to
+  // another agent, so the same 0.6 is applied here where it can be reached --
+  // and it is arguably the better place for it, because it leaves the cracking
+  // and the potholes in asphalt_worn at their full depth instead of shallowing
+  // every feature on the road at once.
+  //
+  // bump and cavity are then raised back up, because both read this field: at
+  // 0.95 x 0.60 the net normal amplitude is 0.57 of the original, which is the
+  // 0.62 the brief asked for, reached without depending on whether the
+  // normalScale change lands.
+  s.h = 0.35 + big * 0.23 + mid * 0.10 + small * 0.042 + (grit - 0.5) * 0.03;
+  s.ao = mix(0.45, 1.0, smoothstep(0.22, 0.62, s.h));
 
   // bitumen is glossier than stone; wear reverses that as the binder oxidises
   s.rough = mix(0.55 + wear * 0.28, 0.88, stoneMask);
@@ -121,9 +156,11 @@ Surf gen_asphalt(vec2 uv){
   asphalt_worn: {
     world: 4.0,
     // Cut in the same proportion as `asphalt`. The cracking and the potholes
-    // are what should carry the relief here, not the aggregate.
-    bump: 0.78,
-    cavity: 0.62,
+    // are what should carry the relief here, not the aggregate — and because
+    // the aggregate has been shallowed in `s.h` while the crack and pothole
+    // terms below have not, that separation is now real rather than nominal.
+    bump: 1.00,
+    cavity: 0.80,
     deps: ['asphalt'],
     glsl: /* glsl */ `
 Surf gen_asphalt_worn(vec2 uv){
