@@ -48,7 +48,12 @@ export const GUN_MATERIALS = {
   // bloom, so it flares the way a real illuminated reticle does. The scale is
   // set against a sunlit street metering at ~2 units, so it has to be an order
   // of magnitude over that to survive auto-exposure.
-  dot: ['gun_polymer', { color: 0x000000, roughness: 1, envMapIntensity: 0, emissive: 0xff1204, emissiveIntensity: 5.0 }],
+  // The reticle. Emissive lands in the HDR viewmodel buffer before bloom, so it
+  // flares the way a real illuminated dot does. Intensity is a balance rather
+  // than a maximum: past about 3 the red channel clips, ACES desaturates the
+  // clipped value toward white and the grade's orange/teal boost finishes the
+  // job, so a hotter dot is a *less* red one.
+  dot: ['gun_polymer', { color: 0x000000, roughness: 1, envMapIntensity: 0, emissive: 0xff1204, emissiveIntensity: 2.9 }],
   tritium: ['gun_polymer', { color: 0x02120a, roughness: 0.9, envMapIntensity: 0, emissive: 0x39ff9a, emissiveIntensity: 6 }],
   wood: ['gun_wood', { uvScale: 5, envMapIntensity: 0.6 }],
   brass: ['gun_metal', { uvScale: 12, roughness: 0.34, color: 0xc79a4c, metalness: 1, envMapIntensity: 0.7 }],
