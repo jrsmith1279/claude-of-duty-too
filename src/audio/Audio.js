@@ -44,6 +44,42 @@ for (let i = 0; i < 8; i++) {
   RING.push([Math.cos(a), Math.sin(a)]);
 }
 
+// --- sound id normalisation --------------------------------------------------
+//
+// The dispatcher's scheme is `family:variant`. Nothing outside this directory
+// used it: fx spells impacts `impact_concrete`, shells `shell_tick` and
+// hitmarkers `hitmarker`; ai asks for `rifle` and `body_fall`. All of those
+// fell through to `default:` and returned `undefined` — silently, because
+// every call site is optional-chained. Accepting `_` as a separator when the
+// leading token names a real family, plus a small table for the bare nouns,
+// makes both spellings valid rather than making eight callers agree on one.
+
+const FAMILIES = new Set([
+  'shot', 'gun', 'fire', 'step', 'footstep', 'impact', 'hit', 'shell', 'casing',
+  'reload', 'whizz', 'snap', 'explosion', 'boom', 'land', 'body', 'gear', 'cloth',
+  'hurt', 'ui', 'blip',
+]);
+
+const ID_ALIAS = {
+  rifle: 'shot:m4', carbine: 'shot:m4', ak: 'shot:ak74', assault: 'shot:m4',
+  smg: 'shot:mp5', pistol: 'shot:deagle', shotgun: 'shot:m870', sniper: 'shot:dmr',
+  bodyfall: 'body:fall', body_fall: 'body:fall', corpse: 'body:fall',
+  hitmarker: 'ui:blip', hitmarker_kill: 'ui:kill', hitmarkerkill: 'ui:kill',
+  ricochet: 'impact:metal', bullet_whizz: 'whizz', bullethit: 'impact',
+  brass: 'shell', casing_bounce: 'shell',
+};
+
+/** `impact_concrete` -> `impact:concrete`, `rifle` -> `shot:m4`, `shot:m4` -> itself. */
+export function normaliseSoundId(id) {
+  const s = String(id || '').toLowerCase();
+  const alias = ID_ALIAS[s];
+  if (alias) return alias;
+  if (s.includes(':')) return s;
+  const u = s.indexOf('_');
+  if (u > 0 && FAMILIES.has(s.slice(0, u))) return `${s.slice(0, u)}:${s.slice(u + 1)}`;
+  return s;
+}
+
 export class AudioSystem {
   constructor() {
     this.ac = null;
@@ -261,11 +297,17 @@ export class AudioSystem {
    * `impact:concrete`, `reload:bolt`. Systems that have the full data should
    * prefer the direct handles on `ctx.audio`, but this keeps the contract's
    * `play(id, opts)` signature honest.
+   *
+   * Ids are normalised first (see `normaliseSoundId`). Every caller outside
+   * this directory was written against `family_variant` or a bare noun, so
+   * before normalisation every bullet impact, every bot rifle shot, every
+   * shell tick and every hitmarker in the game hit the `default:` arm and
+   * returned silently.
    */
   play(id, opts = {}) {
     const g = this.graph;
     if (!g || !this.enabled) return;
-    const s = String(id || '');
+    const s = normaliseSoundId(id);
     const i = s.indexOf(':');
     const fam = i < 0 ? s : s.slice(0, i);
     const variant = i < 0 ? '' : s.slice(i + 1);
@@ -286,6 +328,9 @@ export class AudioSystem {
         return Foley.explosion(g, { x: opts.x ?? 0, y: opts.y ?? 1, z: opts.z ?? 0, ...opts });
       case 'land':
         return Foley.land(g, { local: true, ...opts });
+      case 'body':
+        // A body hitting the ground: the landing thump voiced as flesh, not boots.
+        return Foley.land(g, { impact: 9, surface: 'flesh', ...opts });
       case 'gear': case 'cloth':
         return Foley.gearRustle(g, this.ac, g.bus.foley, this.ac.currentTime, opts.level ?? 1);
       case 'hurt':

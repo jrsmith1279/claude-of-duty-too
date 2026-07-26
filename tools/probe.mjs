@@ -67,6 +67,11 @@ const browser = await chromium.launch({
     '--enable-unsafe-swiftshader', '--disable-gpu-driver-bug-workarounds',
     '--enable-webgl-draft-extensions', '--force-device-scale-factor=1',
     '--hide-scrollbars', '--mute-audio',
+    // Lets a probe exercise the audio graph without faking a gesture. The
+    // screenshot harness deliberately does NOT set this: "must not throw
+    // before a user gesture" is part of the audio contract and is only
+    // actually tested if the harness runs without one.
+    '--autoplay-policy=no-user-gesture-required',
   ],
 });
 const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
