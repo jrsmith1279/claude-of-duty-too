@@ -10,7 +10,15 @@ import * as THREE from 'three';
  *
  * The transfer runs on the post-tone-map display signal: linearise, white
  * balance, ASC CDL (slope/offset/power), back to display, S-curve around a
- * pivot, split-tone, luminance-weighted saturation, then a print black lift.
+ * pivot, split-tone, luminance-weighted saturation, a selective boost on the
+ * orange/teal axis, then a print black lift.
+ *
+ * The orange/teal step (`otBoost`) is the recognisable half of the look.
+ * `ART_DIRECTION.md` asks for a global desaturation of ~12% followed by a
+ * selective saturation boost on that one axis, which is exactly what the
+ * blockbuster grade does: everything off-axis (greens, magentas) goes muddy
+ * while warm keys and cool fills stay vivid, so the frame reads as two
+ * temperatures rather than a wash of colour.
  */
 
 export const LUT_SIZE = 32;
@@ -30,25 +38,31 @@ const LOOKS = {
     shadowTint: [-0.004, 0.0, 0.010],
     highlightTint: [0.010, 0.005, -0.004],
     splitStrength: 1.0,
-    blackLift: 0.006,
+    otBoost: 0.0,
+    blackLift: 0.012,
     whiteCut: 0.0,
   },
+  // The daylight look. Global desat then an orange/teal boost, a hard teal lift
+  // in the toe and a warm highlight bias — the warm-key / cool-fill separation
+  // ART_DIRECTION.md calls "what makes CoD's daylight read as expensive".
   warm_desert: {
-    wb: [1.055, 1.0, 0.902],
+    wb: [1.068, 1.0, 0.888],
     exposure: 0.02,
-    gain: [1.02, 1.0, 0.965],
-    lift: [0.002, 0.0, 0.004],
-    gamma: [0.98, 1.0, 1.035],
-    contrast: 0.28,
+    gain: [1.03, 1.0, 0.955],
+    lift: [0.002, 0.0, 0.006],
+    gamma: [0.972, 1.0, 1.048],
+    contrast: 0.30,
     pivot: 0.40,
-    sat: 1.07,
-    satShadow: 0.86,
-    satHighlight: 0.92,
-    shadowTint: [-0.012, -0.002, 0.030],
-    highlightTint: [0.034, 0.016, -0.024],
+    sat: 0.88,
+    satShadow: 0.94,
+    satHighlight: 1.00,
+    shadowTint: [-0.022, -0.002, 0.046],
+    highlightTint: [0.050, 0.021, -0.038],
     splitStrength: 1.0,
-    blackLift: 0.013,
-    whiteCut: 0.004,
+    otBoost: 0.42,
+    // ART_DIRECTION.md: the toe must not clip before ~0.02. Never pure #000.
+    blackLift: 0.022,
+    whiteCut: 0.005,
   },
   cold_urban: {
     wb: [0.936, 0.988, 1.078],
@@ -64,7 +78,8 @@ const LOOKS = {
     shadowTint: [-0.016, 0.006, 0.032],
     highlightTint: [0.006, 0.012, 0.018],
     splitStrength: 1.0,
-    blackLift: 0.020,
+    otBoost: 0.20,
+    blackLift: 0.022,
     whiteCut: 0.014,
   },
   night_teal: {
@@ -81,6 +96,9 @@ const LOOKS = {
     shadowTint: [-0.024, 0.010, 0.052],
     highlightTint: [0.052, 0.024, -0.026],
     splitStrength: 1.0,
+    // Night is already two temperatures — moon blue against sodium orange —
+    // so it wants the axis boost too, just gentler than daylight.
+    otBoost: 0.30,
     blackLift: 0.030,
     whiteCut: 0.006,
   },
@@ -103,6 +121,14 @@ function sCurve(x, amount, pivot) {
   const shift = (ps - p) * amount;
   return clamp01(blended - shift * (1 - Math.abs(2 * t - 1)));
 }
+
+/**
+ * Unit chroma direction of a saturated orange (255,140,38) with its luminance
+ * removed. Its dot product with the CIE luma weights is ~2e-4, so pushing a
+ * colour along it changes hue and chroma without touching brightness — and
+ * because teal is the same axis negated, one projection boosts both ends.
+ */
+const OT_AXIS = [0.6303, -0.1102, -0.7684];
 
 function bake(look, out) {
   const N = LUT_SIZE;
@@ -144,6 +170,20 @@ function bake(look, out) {
         dr = l1 + (dr - l1) * sat;
         dg = l1 + (dg - l1) * sat;
         db = l1 + (db - l1) * sat;
+
+        // Selective saturation on the orange/teal axis only. Project the
+        // residual chroma onto the axis and re-add a fraction of it, so warm
+        // keys and cool fills recover the chroma the global desat took while
+        // everything off-axis stays muted.
+        const ot = look.otBoost || 0;
+        if (ot !== 0) {
+          const cr = dr - l1, cg = dg - l1, cb = db - l1;
+          const p = cr * OT_AXIS[0] + cg * OT_AXIS[1] + cb * OT_AXIS[2];
+          const k = p * ot;
+          dr += OT_AXIS[0] * k;
+          dg += OT_AXIS[1] * k;
+          db += OT_AXIS[2] * k;
+        }
 
         const span = 1 - look.blackLift - look.whiteCut;
         dr = look.blackLift + clamp01(dr) * span;
