@@ -992,7 +992,7 @@ export function groundDecals(ctx, site, soft, hard, kit, rand, density = 1, env 
     (d > 12 || d < 2.2 ? 0 : 1) * (s === 'asphalt' || s === 'asphalt_worn' ? 1.6 : 0.4));
   if (nearWall.empty && anywhere.empty) return { count: 0 };
 
-  const put = (field, n, kind, wMin, wMax, aspect, v, warm, bs) => {
+  const put = (field, n, kind, wMin, wMax, aspect, v, warm, bs, mul = 1) => {
     for (let i = 0; i < n; i++) {
       const p = field.sample(rand);
       if (!p) break;
@@ -1000,7 +1000,9 @@ export function groundDecals(ctx, site, soft, hard, kit, rand, density = 1, env 
       if (!geo) break;
       const w = wMin + rand() * (wMax - wMin);
       const h = w * (aspect[0] + rand() * (aspect[1] - aspect[0]));
-      onGround(bs, 'gun_polymer', geo, p.x, p.y, p.z, w, h, rand() * 6.2832, tint(rand, v, warm));
+      const c = tint(rand, v, warm);
+      if (mul !== 1) c.multiplyScalar(mul);
+      onGround(bs, 'gun_polymer', geo, p.x, p.y, p.z, w, h, rand() * 6.2832, c);
       count++;
     }
   };
@@ -1018,9 +1020,43 @@ export function groundDecals(ctx, site, soft, hard, kit, rand, density = 1, env 
   // Where vehicles stood and stopped.
   put(midRoad, N(52), 'oil', 0.9, 2.6, [0.6, 1.0], 0.12, -0.02, soft);
   put(midRoad, N(40), 'scorch', 1.2, 3.0, [0.7, 1.1], 0.14, 0.02, soft);
-  put(midRoad, N(80), 'impactSpray', 0.8, 2.2, [0.8, 1.2], 0.14, 0.03, hard);
+  // Ground spall at 0.55 of full tint, and 45 of them rather than 80.
+  // `drawImpact` paints its spall ring at #c4bcac, which is right on a plaster
+  // wall and reads as a chain of pale worms crawling across a 0.12-linear road
+  // — the same "bright thin mark hovering on dark tarmac" the paper litter had.
+  // Real spall on asphalt is grey dust, and it is sparse.
+  put(midRoad, N(45), 'impactSpray', 0.8, 2.0, [0.8, 1.2], 0.14, 0.03, hard, 0.55);
 
   count += roadHistory(site, hard, kit, rand, density);
+
+  /**
+   * The damp bucket's material, finished off from this side.
+   *
+   * `Props.js` creates the bucket and gives it the roughness 0.40 that is the
+   * entire reason it exists, but it cannot give it a `map` — the atlas belongs
+   * to this module and Props.js has no business knowing about it. Without one
+   * the bucket resolves to plain `gun_polymer` and every damp quad renders as a
+   * rectangle of grey polymer lying on the road, alpha-tested against a texture
+   * that is opaque everywhere. It has to be set here.
+   *
+   * `normalScale`, `clearcoat` and `side` are set to match `overrides(true)`
+   * exactly. They are structural — `clearcoat` in particular flips
+   * USE_CLEARCOAT — so leaving them off does not merely differ in look, it
+   * compiles a second shader program, and the program ledger is at 61 against a
+   * 60 budget. Matching them collapses damp onto the blended decal permutation
+   * that already exists and the bucket costs one draw call and nothing else.
+   * Everything the damp look actually needs (roughness, envMapIntensity) is
+   * non-structural and survives.
+   */
+  if (env?.envOverrides && kit.texture) {
+    env.envOverrides.damp = {
+      map: kit.texture,
+      normalScale: 0,
+      clearcoat: 0,
+      opacity: 1,
+      side: THREE.FrontSide,
+    };
+  }
   count += dampPass(site, env?.decalDamp, kit, rand, density);
 
   return { count };
@@ -1118,13 +1154,11 @@ function roadHistory(site, hard, kit, rand, density) {
     const s = sLo + 2 + i * 4.5;
     lay('paintLine', (rand() - 0.5) * 0.12, s, 2.4, 0.16, 0, 0.06, 0);
   }
-  // A crossing: bars long ALONG the direction of travel, spaced across it.
-  // Laid the other way round they stack into a ladder of transverse rungs
-  // marching down the carriageway, which is what the first version did.
-  const barS = sLo + span * (0.28 + rand() * 0.3);
-  for (let i = -3; i <= 3; i++) {
-    lay('paintLine', i * 1.15, barS, 2.4, 0.5, 0, 0.06, 0);
-  }
+  // NO crossing bar set. It was in and it came out: a 0.5 m bar seen at a
+  // glancing angle from eye level drops to a low mip where the cell's wear
+  // holes dominate what is left of the band, and the result reads as a ring of
+  // pale blobs rather than as paint. The broken centreline is 2.4 m long in the
+  // view direction and never hits that angle, so it stays.
 
   return count;
 }
