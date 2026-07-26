@@ -46,7 +46,8 @@ const MAX_DPR = 2;
 export class HUDSystem {
   constructor() {
     this.visible = true;        // what the game asked for
-    this.forced = null;         // explicit setVisible() wins over auto-hide
+    this.forced = null;         // explicit setVisible(false) wins over everything
+    this.preview = false;       // HUD review tooling only — see _effective()
     this.override = false;      // camera:override from the harness
     this.alpha = 1;
     this.w = 1; this.h = 1; this.dpr = 1;
@@ -169,6 +170,7 @@ export class HUDSystem {
     // Merge, never replace: several systems attach their own hooks here.
     const api = (window.__COD__ = window.__COD__ || {});
     api.setHudVisible = (v) => this._setVisible(v);
+    api.setHudPreview = (v) => { this.preview = !!v; this._apply(); };
     api.hud = {
       setVisible: (v) => this._setVisible(v),
       notify: (t, s) => this.notify.push(t, s),
@@ -248,8 +250,16 @@ export class HUDSystem {
     this._apply();
   }
 
-  /** Visible only if the game wants it AND the harness is not driving. */
+  /**
+   * Visible only if the game wants it AND the harness is not driving.
+   *
+   * `preview` is the one escape hatch, and only the HUD's own review tooling
+   * sets it — it exists so the layout can be screenshotted from a posed camera.
+   * The screenshot harness never touches it, so a critic frame cannot get a HUD
+   * in it by accident.
+   */
   _effective() {
+    if (this.preview) return true;
     if (this.forced === false) return false;
     if (this.override) return false;
     return this.visible;

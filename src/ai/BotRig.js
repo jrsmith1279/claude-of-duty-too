@@ -223,16 +223,41 @@ function at(x, y, z, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1) {
   return _m.compose(_p, _q, _s).clone();
 }
 
-/** Rounded box — chamfered edges, because a hard 90° edge reads as a box. */
+const _rv = new THREE.Vector3();
+const _rc = new THREE.Vector3();
+
+/**
+ * Rounded box. A hard 90° edge reads as an untextured box at any distance, and
+ * on a body it reads as LEGO; every hard edge on a bot gets a radius.
+ *
+ * The naive "clamp the corners inwards" version this replaces did nothing at
+ * all — with one segment per axis *every* vertex is a corner, so clamping them
+ * all just produced a slightly smaller box. Real rounding needs interior
+ * vertices to hold the flat of the face, hence the forced minimum of two
+ * segments: each vertex is projected onto the surface of the box's Minkowski
+ * sum with a sphere of radius `r`, which is exactly a rounded box.
+ */
 function rbox(w, h, d, r = 0.02, seg = 1) {
-  const g = new THREE.BoxGeometry(w, h, d, seg, seg, seg);
+  const s = Math.max(2, seg + 1);
+  const g = new THREE.BoxGeometry(w, h, d, s, s, s);
+  const rr = Math.min(r, w * 0.42, h * 0.42, d * 0.42);
+  const hx = w / 2 - rr, hy = h / 2 - rr, hz = d / 2 - rr;
   const p = g.attributes.position;
-  const hx = w / 2 - r, hy = h / 2 - r, hz = d / 2 - r;
   for (let i = 0; i < p.count; i++) {
-    p.setX(i, THREE.MathUtils.clamp(p.getX(i), -hx, hx) + Math.sign(p.getX(i)) * r * 0.72);
-    p.setY(i, THREE.MathUtils.clamp(p.getY(i), -hy, hy) + Math.sign(p.getY(i)) * r * 0.72);
-    p.setZ(i, THREE.MathUtils.clamp(p.getZ(i), -hz, hz) + Math.sign(p.getZ(i)) * r * 0.72);
+    _rv.fromBufferAttribute(p, i);
+    _rc.set(
+      THREE.MathUtils.clamp(_rv.x, -hx, hx),
+      THREE.MathUtils.clamp(_rv.y, -hy, hy),
+      THREE.MathUtils.clamp(_rv.z, -hz, hz),
+    );
+    _rv.sub(_rc);
+    const l = _rv.length();
+    if (l > 1e-6) _rv.multiplyScalar(rr / l).add(_rc); else _rv.copy(_rc);
+    p.setXYZ(i, _rv.x, _rv.y, _rv.z);
   }
+  // BoxGeometry keeps one vertex per face corner, so this averages within a
+  // face and not across the rounded edge: the flat stays flat, the radius
+  // catches a highlight, and adjacent faces still meet exactly.
   g.computeVertexNormals();
   return g;
 }
@@ -251,21 +276,21 @@ function sphere(r, wSeg = 10, hSeg = 7) {
 // Tactical palette. These multiply the cloth/gun albedo maps, so they read
 // darker in frame than they do here — tuned against the actual screenshot.
 const C = {
-  fatigue: 0xa39d84,   // dusty olive-tan combat shirt/trousers
-  fatigueDark: 0x8a866f,
-  carrier: 0x5d6151,   // plate carrier, coyote-green
-  pouch: 0x6b6a55,
-  strap: 0x4a4a3f,
-  boot: 0x3a332c,
-  glove: 0x2f2f2c,
-  helmet: 0x5a5e52,
-  helmetTrim: 0x3c3f38,
-  goggle: 0x1b1e22,
-  face: 0x2a2823,      // balaclava
+  fatigue: 0x968f76,   // dusty olive-tan combat shirt/trousers
+  fatigueDark: 0x7b7660,
+  carrier: 0x545849,   // plate carrier, coyote-green
+  pouch: 0x605f4c,
+  strap: 0x42423a,
+  boot: 0x332e28,
+  glove: 0x2b2b28,
+  helmet: 0x4f534a,
+  helmetTrim: 0x35382f,
+  goggle: 0x181b1f,
+  face: 0x24231f,      // balaclava
   gunDark: 0x9aa0a4,   // multiplies the gun_metal map
   gunPoly: 0x7d8288,
   optic: 0x40464b,
-  packA: 0x6d6a55,
+  packA: 0x625f4c,
 };
 
 /** The cloth half of the body. */
@@ -354,12 +379,25 @@ function buildGear() {
     b.add(rbox(0.110, 0.150, 0.060, 0.028), at(s * 0.100, 0.520, 0.062), C.helmetTrim, rigid('shin' + S), 2.4);
   }
 
-  // Helmet: dome, brim, NVG mount, side rails.
+  // Boots. Authored so the sole sits exactly on y = 0 in the rest pose — the
+  // foot IK plants the ankle at ground + 0.085, and a sole modelled below the
+  // origin would bury itself in the road.
   for (const s of [-1, 1]) {
     const S = s < 0 ? 'L' : 'R';
-    b.add(rbox(0.118, 0.105, 0.290, 0.020), at(s * 0.100, 0.038, 0.030), C.boot, rigid('foot' + S), 2.4);
-    b.add(rbox(0.124, 0.032, 0.300, 0.014), at(s * 0.100, -0.010, 0.032), C.helmetTrim, rigid('foot' + S), 2.4);
+    b.add(rbox(0.120, 0.106, 0.286, 0.026), at(s * 0.100, 0.066, 0.030), C.boot, rigid('foot' + S), 2.4);
+    b.add(rbox(0.128, 0.034, 0.300, 0.014), at(s * 0.100, 0.017, 0.032), C.helmetTrim, rigid('foot' + S), 2.4);
+    // Toe box, so the boot is not one slab from heel to tip.
+    b.add(rbox(0.108, 0.070, 0.090, 0.030), at(s * 0.100, 0.050, 0.145), C.boot, rigid('toe' + S), 2.4);
   }
+
+  // Sling, worn across the chest. It is skinned to the torso rather than to the
+  // weapon: a strap that has to stretch between two independently animated
+  // bones is a rig problem with no visual payoff at 15 m, and the read we want
+  // is just the diagonal line across the plate carrier.
+  b.add(rbox(0.048, 0.400, 0.028, 0.012), at(-0.052, 1.300, 0.148, 0, 0, -0.52), C.strap, rigid('chest'), 2.4);
+  b.add(rbox(0.044, 0.230, 0.026, 0.012), at(-0.150, 1.400, -0.030, 0, 0.9, -0.30), C.strap, rigid('chest'), 2.4);
+
+  // Helmet: dome, brim, NVG mount, side rails.
   const dome = new THREE.SphereGeometry(0.128, 14, 9, 0, Math.PI * 2, 0, Math.PI * 0.58);
   b.add(dome, at(0, 1.672, 0.002, 0, 0, 0, 1.0, 1.06, 1.08), C.helmet, rigid('head'), 2.0);
   b.add(rbox(0.250, 0.036, 0.270, 0.016), at(0, 1.680, 0.008), C.helmet, rigid('head'), 2.2);
